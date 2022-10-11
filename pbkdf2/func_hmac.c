@@ -1,25 +1,29 @@
 #include <openssl/hmac.h>
-#include <openssl/sha.h>
 #include <string.h>
 
-typedef unsigned long size_t;
-
-int KDF_PBKDF2_MIN_KEY_LEN_BITS = 112;
-int KDF_PBKDF2_MAX_KEY_LEN_DIGEST_RATIO = 0xFFFFFFFF;
-int KDF_PBKDF2_MIN_ITERATIONS = 1000;
-int KDF_PBKDF2_MIN_SALT_LEN = 128 / 8;
+/*
+#define KDF_PBKDF2_MIN_KEY_LEN_BITS 112
+#define KDF_PBKDF2_MAX_KEY_LEN_DIGEST_RATIO 0xFFFFFFFF
+#define KDF_PBKDF2_MIN_ITERATIONS 1000
+#define KDF_PBKDF2_MIN_SALT_LEN 128 / 8
+*/
 
 int pbkdf2_derive(const char *pass, size_t passlen,
                          const unsigned char *salt, int saltlen, uint64_t iter,
                          const EVP_MD *digest, unsigned char *key,
                          size_t keylen, int lower_bound_checks)
 {
+    uint64_t KDF_PBKDF2_MIN_KEY_LEN_BITS = 112;
+    uint64_t KDF_PBKDF2_MAX_KEY_LEN_DIGEST_RATIO = 0xFFFFFFFF;
+    uint64_t KDF_PBKDF2_MIN_ITERATIONS = 1000;
+    uint64_t KDF_PBKDF2_MIN_SALT_LEN = 128 / 8;
+
     int ret = 0;
     unsigned char digtmp[EVP_MAX_MD_SIZE], *p, itmp[4];
     int cplen, k, tkeylen, mdlen;
     uint64_t j;
     unsigned long i = 1;
-    HMAC_CTX *hctx_tpl = NULL, *hctx = NULL;
+    HMAC_CTX *hctx_tpl = 0, *hctx = 0;
 
     mdlen = 20;
 
@@ -46,7 +50,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     hctx_tpl = HMAC_CTX_new();
     p = key;
     tkeylen = keylen;
-    HMAC_Init_ex(hctx_tpl, pass, passlen, digest, NULL);
+    HMAC_Init_ex(hctx_tpl, pass, passlen, digest, 0);
     hctx = HMAC_CTX_new();
 
     while (tkeylen) {
@@ -69,14 +73,14 @@ int pbkdf2_derive(const char *pass, size_t passlen,
         HMAC_CTX_copy(hctx, hctx_tpl);
         HMAC_Update(hctx, salt, saltlen);
         HMAC_Update(hctx, itmp, 4);
-        HMAC_Final(hctx, digtmp, NULL);
+        HMAC_Final(hctx, digtmp, 0);
 
         memcpy(p, digtmp, cplen);
 
         for (j = 1; j < iter; j++) {
             HMAC_CTX_copy(hctx, hctx_tpl);
             HMAC_Update(hctx, digtmp, mdlen);
-            MAC_Final(hctx, digtmp, NULL);
+            HMAC_Final(hctx, digtmp, 0);
 
             for (k = 0; k < cplen; k++)
                 p[k] ^= digtmp[k];
@@ -94,7 +98,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
 
 int main(int argc, char** argv) {
 
-    char pass[]="password";
+    char pass[] = "password";
     char salt[] = "salt";
     int iter=4096;
     int key_len = 20;

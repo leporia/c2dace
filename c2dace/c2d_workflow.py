@@ -79,7 +79,7 @@ def c2d_workflow(_dir,
 
     index = clang.cindex.Index.create()
     print("parsing...")
-    tu = index.parse(filename)
+    tu = index.parse(filename, ['-I/usr/include', '-I/usr/local/include', '-I/usr/lib64/clang/13.0.1/include'])
     if len(tu.diagnostics) > 0:
         print("encountered " + str(len(tu.diagnostics)) +
               Formatting.format_string(" diagnostics", Formatting.YELLOW) +
@@ -156,7 +156,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == CondExtractor:
+            if transformation == InsertMissingBasicBlocks:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:

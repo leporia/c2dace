@@ -84,13 +84,22 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
     ]
     binop_nodes = [node for node in walk(node.body) if isinstance(node, BinOp)]
     write_nodes = [node for node in binop_nodes if node.op == "="]
-    call_nodes = [node.args for node in walk(node.body) if isinstance(node, CallExpr)]
+    call_nodes = [node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name not in state.ext_functions]
     call_nodes = sum(call_nodes, [])
     call_nodes = filter(lambda x: hasattr(x, "type"), call_nodes)
     call_nodes = filter(lambda x: isinstance(x.type, Pointer), call_nodes)
 
+    ext_call_nodes = [[node.args, state.ext_functions[node.name.name]] for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name in state.ext_functions]
+
     write_vars = [node.lvalue for node in write_nodes] + list(copy.deepcopy(call_nodes))
     read_vars = copy.deepcopy(used_vars) + list(call_nodes)
+    for calls in ext_call_nodes:
+        for i in range(len(calls[0])):
+            if "out" in calls[1][i]:
+                write_vars.append(calls[0][i])
+            if "in" in calls[1][i]:
+                read_vars.append(calls[0][i])
+
     for i in write_vars:
         if i in read_vars:
             read_vars.remove(i)
@@ -589,6 +598,12 @@ class AST2SDFG:
         self.libraries["printf"] = "print"
         self.libraries["fprintf"] = "print"
         self.libstates = ["print"]
+
+        self.ext_functions = {}
+        self.ext_functions["HMAC_CTX_copy"] = ["out", "in"]
+        self.ext_functions["HMAC_Update"] = ["out", "in", "in"]
+        self.ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
+
         self.incomplete_arrays = {}
         self.name_mapping = name_mapping or NameMap()
         self.arr_start_name_mapping = {}
@@ -638,6 +653,8 @@ class AST2SDFG:
             ULongLong: dace.uint64,
             Bool: dace.int8,
             ULong: dace.uint32,
+            UChar: dace.int8,
+            Struct: dace.uint64, #only for external "blackbox" calls, pointer to struct
         }
 
     def translate(self, node: Node, sdfg: SDFG):
@@ -696,6 +713,8 @@ class AST2SDFG:
                 raise TypeError("Should be &")
         elif isinstance(node, ParenExpr):
             return self.strip(node.expr)
+        elif isinstance(node, CallExpr):
+            return self.strip(node.name)
         else:
             return node
 
@@ -748,13 +767,24 @@ class AST2SDFG:
         binop_nodes = [
             node for node in walk(node.body) if isinstance(node, BinOp)
         ]
-        call_nodes = [node.args for node in walk(node.body) if isinstance(node, CallExpr)]
+        call_nodes = [node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name not in self.ext_functions]
         call_nodes = sum(call_nodes, [])
         call_nodes = filter(lambda x: hasattr(x, "type"), call_nodes)
         call_nodes = filter(lambda x: isinstance(x.type, Pointer), call_nodes)
 
+        ext_call_nodes = [[node.args, self.ext_functions[node.name.name]] for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name in self.ext_functions]
+
         write_nodes = [node for node in binop_nodes if node.op == "="]
         write_vars = [] + list(copy.deepcopy(call_nodes))
+        read_vars = copy.deepcopy(used_vars) + list(call_nodes)
+
+        for calls in ext_call_nodes:
+            for i in range(len(calls[0])):
+                if "out" in calls[1][i]:
+                    write_vars.append(calls[0][i])
+                if "in" in calls[1][i]:
+                    read_vars.append(calls[0][i])
+
         for n in write_nodes:
             tmp = n.lvalue
             while isinstance(tmp, ParenExpr):
@@ -762,10 +792,10 @@ class AST2SDFG:
 
             write_vars.append(tmp)
 
-        read_vars = copy.deepcopy(used_vars) + list(call_nodes)
         for i in write_vars:
             if i in read_vars:
                 read_vars.remove(i)
+
         write_vars = remove_duplicates(write_vars)
         read_vars = remove_duplicates(read_vars)
         used_vars = remove_duplicates(used_vars)
@@ -955,6 +985,10 @@ class AST2SDFG:
                 mapped_name = self.name_mapping[self.globalsdfg][i.name]
             else:
                 print(i)
+                if (i.name == "EVP_sha1"):
+                    print("WARNING: EVP_sha1 will be substituted by a dummy")
+                    continue
+
                 raise NameError("Variable name not found: " + i.name)
 
             if not hasattr(var, "shape") or len(var.shape) == 0:
@@ -1311,8 +1345,7 @@ class AST2SDFG:
                       dace.InterstateEdge("not " + condition))
 
     def call2sdfg(self, node: CallExpr, sdfg: SDFG):
-        #print("CALL EXPR")
-        #print(node.name.name)
+        #print("CALL EXPR", node.name.name)
         self.last_call_expression[sdfg] = node.args
         match_found = False
         rettype = node.type
@@ -1324,14 +1357,16 @@ class AST2SDFG:
                 rettype = i.result_type
 
                 #print("aa: ", rettype)
+                #print("matched!!")
                 self.funcdecl2sdfg(i, sdfg)
         if not match_found:
+            #print("no match")
             libstate = self.libraries.get(node.name.name)
             if not isinstance(rettype, Void) and hasattr(node, "hasret"):
                 if node.hasret:
                     hasret = True
                     retval = node.args.pop(len(node.args) - 1)
-            if node.name.name == "free":
+            if node.name.name in ["free", "HMAC_CTX_free"]:
                 return
             input_names_tasklet = {}
             output_names_tasklet = []
@@ -1351,6 +1386,13 @@ class AST2SDFG:
                 node for node in walk(node) if isinstance(node, DeclRefExpr)
             ]
 
+            ext_lib_mapping = self.ext_functions.get(node.name.name)
+            args_in_out = {}
+            if ext_lib_mapping is not None:
+                for i in range(len(node.args)):
+                    if (isinstance(node.args[i], DeclRefExpr)):
+                        args_in_out[node.args[i].name] = ext_lib_mapping[i]
+            
             for i in used_vars:
                 for j in sdfg.arrays:
                     if self.name_mapping.get(sdfg).get(
@@ -1361,19 +1403,30 @@ class AST2SDFG:
                             scalar = True
                         elif (len(elem.shape) == 1 and elem.shape[0] == 1):
                             scalar = True
-                        if not scalar and not node.name.name in [
-                                "fprintf", "printf"
-                        ]:
-                            #    print("ADDING!",
-                            #          not node.name.name in ["fprintf", "printf"],
-                            #          not scalar)
-                            output_names.append(j)
-                            output_names_tasklet.append(i.name)
-                        #print("HERE: ", elem.__class__, j, scalar,
-                        #      node.name.name)
 
-                        input_names_tasklet[i.name] = dace.pointer(elem.dtype)
-                        input_names.append(j)
+                        in_out = args_in_out.get(i.name)
+                        if in_out is not None:
+                            if "in" in in_out:
+                                input_names.append(j)
+                                input_names_tasklet[i.name] = dace.pointer(elem.dtype)
+                            if "out" in in_out:
+                                output_names.append(j)
+                                output_names_tasklet.append(i.name)
+
+                        else:
+                            if not scalar and not node.name.name in [
+                                    "fprintf", "printf"
+                            ]:
+                                #    print("ADDING!",
+                                #          not node.name.name in ["fprintf", "printf"],
+                                #          not scalar)
+                                output_names.append(j)
+                                output_names_tasklet.append(i.name)
+                            #print("HERE: ", elem.__class__, j, scalar,
+                            #      node.name.name)
+
+                            input_names_tasklet[i.name] = dace.pointer(elem.dtype)
+                            input_names.append(j)
 
             output_names_changed = []
             for o, o_t in zip(output_names, output_names_tasklet):
@@ -1726,17 +1779,23 @@ class AST2SDFG:
             else:
                 datatype = self.get_dace_type(node.type)
         elif node.type is not None:
-            # print("vardecl type",node.type)
+            #print("vardecl type",node.type)
             if isinstance(node.type, Pointer):
-                self.incomplete_arrays[(sdfg, node.name)] = node
-                return
+                if (not isinstance(node.type.pointee_type, Struct)):
+                    self.incomplete_arrays[(sdfg, node.name)] = node
+                    return
 
             datatype = self.get_dace_type(node.type)
         if hasattr(node, "sizes"):
             sizes = []
             for i in node.sizes:
                 if isinstance(i, IntLiteral):
-                    sizes.insert(0, i.value[0])
+                    print(i.lineno)
+                    print(i.value)
+                    if (len(i.value) > 0):
+                        sizes.insert(0, i.value[0])
+                    else:
+                        print("fail!!")
                 elif isinstance(i, BinOp):
                     tw = TaskletWriter([], [])
                     text = tw.write_tasklet_code(i)

@@ -96,6 +96,10 @@ class Int(Type):
     _attributes = ()
 
 
+class UInt(Type):
+    _attributes = ()
+
+
 class Long(Type):
     _attributes = ()
 
@@ -125,6 +129,10 @@ class Float(Type):
 
 
 class Char(Type):
+    _attributes = ()
+
+
+class UChar(Type):
     _attributes = ()
 
 

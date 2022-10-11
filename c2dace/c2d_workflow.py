@@ -144,7 +144,7 @@ def c2d_workflow(_dir,
         ParenExprRemover,
     ]
 
-    debug = False
+    debug = True
     global_array_map = dict()
 
     transformation_args = {

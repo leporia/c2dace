@@ -1247,9 +1247,12 @@ class ReplaceStructDeclStatements(NodeTransformer):
     def visit_BinOp(self, node: BinOp):
         if hasattr(node.lvalue, "type") and hasattr(node.rvalue, "type"):
             if node.lvalue.type.is_struct_like():
+                struct = node.lvalue.type.get_chain_end()
+                if self.get_struct(struct.name) is None:
+                    return self.generic_visit(node)
+
                 if node.lvalue.type == node.rvalue.type:
                     # assign a struct to another
-                    struct = node.lvalue.type.get_chain_end()
 
                     if node.op == "=":
                         replacement_statements = []
@@ -1362,6 +1365,8 @@ class ReplaceStructDeclStatements(NodeTransformer):
     def visit_ParmDecl(self, node: ParmDecl):
         if node.type.is_struct_like():
             splits = self.split_struct_type(node.type, node.name)
+            if splits is None:
+                return self.generic_visit(node)
 
             return [ParmDecl(name=n, type=t) for (n, t) in splits.values()]
 

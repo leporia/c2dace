@@ -317,9 +317,12 @@ class TaskletWriter:
             Double: "double",
             Float: "float",
             Int: "int",
+            UInt: "uint64_t",
             Char: "char",
+            UChar: "unsigned char",
             Long: "long",
-            LongLong: "long long"
+            LongLong: "long long",
+            ULong: "unsigned long",
         }
         self.ast_elements = {
             BinOp: self.binop2string,
@@ -634,6 +637,7 @@ class AST2SDFG:
             LongLong: dace.int64,
             ULongLong: dace.uint64,
             Bool: dace.int8,
+            ULong: dace.uint32,
         }
 
     def translate(self, node: Node, sdfg: SDFG):

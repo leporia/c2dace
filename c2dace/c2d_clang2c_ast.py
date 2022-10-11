@@ -63,6 +63,7 @@ def typedef_decl(cnode, files):
 
 
 def func_decl(cnode, files):
+    #print("FUNCDECL:",str(cnode.spelling))
     nodes = [create_own_ast(i, files) for i in cnode.get_children()]
     args = [node for node in nodes if isinstance(node, ParmDecl)]
     body = [node for node in nodes if isinstance(node, BasicBlock)]
@@ -90,6 +91,7 @@ def parm_decl(cnode, files):
 
     if cnode.type.kind is TypeKind.CONSTANTARRAY:
         sizes = [n for n in nodes if not isinstance(n, TypeRef)]
+    #print("PARMDECL:",cnode.spelling, cnode.type.kind)
     return ParmDecl(name=cnode.spelling,
                     type=get_c_type_from_clang_type(cnode.type),
                     typeref=typerefs,
@@ -508,7 +510,7 @@ def member_ref_expr(cnode, files):
 
 
 def call_expr(cnode, files):
-    #print(cnode.spelling)
+    #print("Call expr ", cnode.spelling)
     if cnode.spelling in ["malloc"]:
         print("Dound malloc")
     #    return DeclRefExpr(name=cnode.spelling)
@@ -568,6 +570,10 @@ def type_int(clang_type: clang.cindex.Type):
     return Int()
 
 
+def type_uint(clang_type: clang.cindex.Type):
+    return UInt()
+
+
 def type_longlong(clang_type: clang.cindex.Type):
     return LongLong()
 
@@ -596,6 +602,10 @@ def type_double(clang_type: clang.cindex.Type):
 
 def type_char(clang_type: clang.cindex.Type):
     return Char()
+
+
+def type_uchar(clang_type: clang.cindex.Type):
+    return UChar()
 
 
 def type_bool(clang_type: clang.cindex.Type):
@@ -924,17 +934,17 @@ supported_type_kinds = {
     TypeKind.BOOL: type_bool,
     TypeKind.FUNCTIONPROTO: type_functionproto,
     TypeKind.VOID: type_void,
+    TypeKind.UCHAR: type_uchar,
+    TypeKind.UINT: type_uint,
 }
 
 unsupported_type_kinds = [
     TypeKind.INVALID,
     TypeKind.UNEXPOSED,
     TypeKind.CHAR_U,
-    TypeKind.UCHAR,
     TypeKind.CHAR16,
     TypeKind.CHAR32,
     TypeKind.USHORT,
-    TypeKind.UINT,
     TypeKind.UINT128,
     TypeKind.SCHAR,
     TypeKind.WCHAR,

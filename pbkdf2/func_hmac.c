@@ -9,8 +9,7 @@
 */
 
 int pbkdf2_derive(const char *pass, size_t passlen,
-                         const unsigned char *salt, int saltlen, uint64_t iter,
-                         const EVP_MD *digest, unsigned char *key,
+                         const unsigned char *salt, int saltlen, uint64_t iter, unsigned char *key,
                          size_t keylen, int lower_bound_checks)
 {
     uint64_t KDF_PBKDF2_MIN_KEY_LEN_BITS = 112;
@@ -50,7 +49,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     hctx_tpl = HMAC_CTX_new();
     p = key;
     tkeylen = keylen;
-    HMAC_Init_ex(hctx_tpl, pass, passlen, digest, 0);
+    HMAC_Init_ex(hctx_tpl, pass, passlen, EVP_sha1(), 0);
     hctx = HMAC_CTX_new();
 
     while (tkeylen) {
@@ -91,6 +90,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     }
     ret = 1;
 
+    key[0] = 0; // tmp, do alias analysis
     HMAC_CTX_free(hctx);
     HMAC_CTX_free(hctx_tpl);
     return ret;
@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
     int key_len = 20;
     char result[key_len];
 
-    int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, EVP_sha1(), result, key_len, 0);
+    int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, key_len, 0);
 
     if (!success) {
         printf("error\n");

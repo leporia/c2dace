@@ -281,6 +281,7 @@ def finish_add_state_to_sdfg(state: SDFGState, top_sdfg: SDFG,
 
 
 def remove_duplicates(vars: List[DeclRefExpr]):
+    vars = list(filter(lambda x: not isinstance(x, IntLiteral), vars))
     i = 0
     while i < len(vars):
         if isinstance(vars[i], ParenExpr):
@@ -600,9 +601,13 @@ class AST2SDFG:
         self.libstates = ["print"]
 
         self.ext_functions = {}
+        self.ext_functions["HMAC_Init_ex"] = ["out", "in", "in", "in", "in"]
         self.ext_functions["HMAC_CTX_copy"] = ["out", "in"]
         self.ext_functions["HMAC_Update"] = ["out", "in", "in"]
         self.ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
+        self.ext_functions["HMAC_CTX_free"] = ["in"]
+        self.ext_functions["HMAC_CTX_new"] = []
+        self.ext_functions["EVP_sha1"] = []
 
         self.incomplete_arrays = {}
         self.name_mapping = name_mapping or NameMap()
@@ -654,7 +659,6 @@ class AST2SDFG:
             Bool: dace.int8,
             ULong: dace.uint32,
             UChar: dace.int8,
-            Struct: dace.uint64, #only for external "blackbox" calls, pointer to struct
         }
 
     def translate(self, node: Node, sdfg: SDFG):
@@ -681,6 +685,12 @@ class AST2SDFG:
 
     def get_dace_type(self, type: Type):
         assert isinstance(type, Type)
+        if isinstance(type, Pointer) and isinstance(type.pointee_type, Struct):
+            if "struct" in type.pointee_type.name:
+                return dace.opaque(type.pointee_type.name + "*")
+            else:
+                return dace.opaque("struct " + type.pointee_type.name + "*")
+
         if isinstance(type, Array):
             return self.get_dace_type(type.element_type)
 
@@ -985,10 +995,6 @@ class AST2SDFG:
                 mapped_name = self.name_mapping[self.globalsdfg][i.name]
             else:
                 print(i)
-                if (i.name == "EVP_sha1"):
-                    print("WARNING: EVP_sha1 will be substituted by a dummy")
-                    continue
-
                 raise NameError("Variable name not found: " + i.name)
 
             if not hasattr(var, "shape") or len(var.shape) == 0:
@@ -1366,7 +1372,7 @@ class AST2SDFG:
                 if node.hasret:
                     hasret = True
                     retval = node.args.pop(len(node.args) - 1)
-            if node.name.name in ["free", "HMAC_CTX_free"]:
+            if node.name.name in ["free"]:
                 return
             input_names_tasklet = {}
             output_names_tasklet = []

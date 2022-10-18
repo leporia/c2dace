@@ -178,16 +178,26 @@ def c2d_workflow(_dir,
     debug = True
     global_array_map = dict()
 
+    ext_functions = {}
+    ext_functions["HMAC_Init_ex"] = ["out", "in", "in", "in", "in"]
+    ext_functions["HMAC_CTX_copy"] = ["out", "in"]
+    ext_functions["HMAC_Update"] = ["out", "in", "in"]
+    ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
+    ext_functions["HMAC_CTX_free"] = ["in"]
+    ext_functions["HMAC_CTX_new"] = []
+    ext_functions["EVP_sha1"] = []
+
     transformation_args = {
         ArrayPointerExtractor: [global_array_map],
         ArrayPointerReset: [global_array_map],
+        CallExtractor: [ext_functions]
     }
 
     for transformation in transformations:
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == InsertMissingBasicBlocks:
+            if transformation == MoveReturnValueToArguments:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:

@@ -555,7 +555,7 @@ def iter_child_nodes(node):
                     yield item
 
 
-def walk(node):
+def walk(node, skip_class=None):
     """
     Recursively yield all descendant nodes in the tree starting at *node*
     (including *node* itself), in no specified order.  This is useful if you
@@ -565,6 +565,8 @@ def walk(node):
     todo = deque([node])
     while todo:
         node = todo.popleft()
+        if skip_class is not None and isinstance(node, skip_class):
+            continue
         #print(node.__class__.__name__)
         todo.extend(iter_child_nodes(node))
         yield node

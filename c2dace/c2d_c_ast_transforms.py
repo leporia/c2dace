@@ -670,6 +670,9 @@ class InitExtractor(NodeTransformer):
                                 lvalue=DeclRefExpr(name=i.name),
                                 rvalue=IntLiteral(value="0")))
                 '''
+                if isinstance(i.type, Pointer) and isinstance(i.type.pointee_type, Struct):
+                    # only structs left are the external ones, no need to to init extraction
+                    continue
 
                 newbody.append(
                     BinOp(op="=",
@@ -680,23 +683,29 @@ class InitExtractor(NodeTransformer):
 
 
 class CallExtractorNodeLister(NodeVisitor):
-    def __init__(self):
+    def __init__(self, ext_functions):
         self.nodes: List[CallExpr] = []
+        self.ext_functions = ext_functions
 
     def visit_ForStmt(self, node: ForStmt):
         return
 
     def visit_CallExpr(self, node: CallExpr):
-        if node.name.name not in ["malloc", "expf", "powf", "sqrt", "cbrt"]:
-            self.nodes.append(node)
-        return self.generic_visit(node)
+        if node.name.name in ["malloc", "expf", "powf", "sqrt", "cbrt"]:
+            return self.generic_visit(node)
+
+        if node.name.name in self.ext_functions:
+            return self.generic_visit(node)
+
+        self.nodes.append(node)
 
     def visit_BasicBlock(self, node: BasicBlock):
         return
 
 
 class CallExtractor(NodeTransformer):
-    def __init__(self, count=0):
+    def __init__(self, ext_functions, count=0):
+        self.ext_functions = ext_functions
         self.count = count
 
     def visit_CallExpr(self, node: CallExpr):
@@ -717,7 +726,7 @@ class CallExtractor(NodeTransformer):
 
         for child in node.body:
             # res = [node for node in Node.walk(child) if isinstance(node, ArraySubscriptExpr)]
-            lister = CallExtractorNodeLister()
+            lister = CallExtractorNodeLister(self.ext_functions)
             lister.visit(child)
             res = lister.nodes
             for i in res:

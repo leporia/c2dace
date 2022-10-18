@@ -774,6 +774,28 @@ class AST2SDFG:
         used_vars = [
             node for node in walk(node.body) if isinstance(node, DeclRefExpr)
         ]
+
+        var_ext_call = [node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name in self.ext_functions]
+        var_ext_call = sum(var_ext_call, [])
+        var_ext_call = list(filter(lambda x: not isinstance(x, IntLiteral), var_ext_call))
+        var_ext_call = list(map(lambda x: x.name, var_ext_call))
+
+        used_vars_outside = [node for node in walk(node.body, skip_class=CallExpr) if isinstance(node, DeclRefExpr)]
+        used_vars_outside += [node.unprocessed_name for node in walk(node.body, skip_class=CallExpr) if isinstance(node, ArraySubscriptExpr)]
+        used_vars_outside += sum([node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name not in self.ext_functions], [])
+        used_vars_outside = list(filter(lambda x: not isinstance(x, IntLiteral), used_vars_outside))
+        used_vars_outside = list(filter(lambda x: not isinstance(x, StringLiteral), used_vars_outside))
+        print(list(map(lambda x: x.name, used_vars_outside)))
+        used_vars_outside = list(map(lambda x: x.name, used_vars_outside))
+
+        only_ext_call = set(var_ext_call) - set(used_vars_outside)
+
+        #print(list(map(lambda x: (x.name, x.type if hasattr(x, "type") else None ), var_decls)))
+
+
+        #print("-"*10)
+        #print(only_ext_call)
+
         binop_nodes = [
             node for node in walk(node.body) if isinstance(node, BinOp)
         ]

@@ -165,7 +165,7 @@ def c2d_workflow(_dir,
         MoveReturnValueToArguments,
         CompoundToBinary,
         CompoundArgumentsExtractor,
-        #ArrayPointerExtractor,
+        ArrayPointerExtractor,
         #ArrayPointerReset,
         #UnaryReferenceAndPointerRemover,
         InitExtractor,
@@ -186,9 +186,14 @@ def c2d_workflow(_dir,
     ext_functions["HMAC_CTX_free"] = ["in"]
     ext_functions["HMAC_CTX_new"] = []
     ext_functions["EVP_sha1"] = []
+    ext_functions["memcpy"] = ["out", "in", "in"]
+
+    ignore_values = dict()
+    FindIgnoreValues(ext_functions, ignore_values).visit(changed_ast)
+    print("Ignored values from ext functions: ", ignore_values)
 
     transformation_args = {
-        ArrayPointerExtractor: [global_array_map],
+        ArrayPointerExtractor: [global_array_map, ext_functions, ignore_values],
         ArrayPointerReset: [global_array_map],
         CallExtractor: [ext_functions]
     }
@@ -197,7 +202,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == MoveReturnValueToArguments:
+            if transformation == CallExtractor:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -251,7 +256,7 @@ def c2d_workflow(_dir,
         DeclRefExpr(name="c2d_retval")
     ]
     translator = AST2SDFG(last_call_expression, globalsdfg, "main",
-                          name_mapping)
+                          name_mapping, ext_functions, ignore_values)
 
     translator.translate(changed_ast, globalsdfg)
 

@@ -67,10 +67,17 @@ def get_var_name(node):
     if isinstance(node, ParenExpr):
         return get_var_name(node.expr)
 
+    if isinstance(node, UnOp):
+        return get_var_name(node.lvalue)
+
     if isinstance(node, DeclRefExpr):
         return node.name
-    else:
-        print("WARNING cannot find name of ", node)
+
+    if isinstance(node, CallExpr):
+        # ignore because is not a variable that we want to handle
+        return
+
+    print("WARNING cannot find name of ", node)
 
 
 def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
@@ -286,9 +293,13 @@ def remove_duplicates(vars: List[DeclRefExpr]):
     while i < len(vars):
         if isinstance(vars[i], ParenExpr):
             vars[i] = vars[i].expr
+        elif isinstance(vars[i], UnOp):
+            vars[i] = vars[i].lvalue
         elif isinstance(vars[i], DeclRefExpr):
             i += 1
         elif isinstance(vars[i], ArraySubscriptExpr):
+            i += 1
+        elif isinstance(vars[i], CallExpr):
             i += 1
         else:
             print("WARNING (remove_duplicates) - UNKNOWN EXPRESSION TYPE:", vars[i])
@@ -298,6 +309,9 @@ def remove_duplicates(vars: List[DeclRefExpr]):
     for i in vars:
         not_found = True
         for j in new_set:
+            if get_var_name(i) == None:
+                not_found = False
+
             if get_var_name(i) == get_var_name(j):
                 not_found = False
                 break
@@ -586,7 +600,9 @@ class AST2SDFG:
             #sdfg: SDFG,
             globalsdfg: SDFG,
             start_function="main",
-            name_mapping=None):
+            name_mapping=None,
+            ext_functions={},
+            ignore_vars={}):
         self.start_function = start_function
         self.last_sdfg_states = {}
         self.loop_depth = -1
@@ -600,14 +616,8 @@ class AST2SDFG:
         self.libraries["fprintf"] = "print"
         self.libstates = ["print"]
 
-        self.ext_functions = {}
-        self.ext_functions["HMAC_Init_ex"] = ["out", "in", "in", "in", "in"]
-        self.ext_functions["HMAC_CTX_copy"] = ["out", "in"]
-        self.ext_functions["HMAC_Update"] = ["out", "in", "in"]
-        self.ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
-        self.ext_functions["HMAC_CTX_free"] = ["in"]
-        self.ext_functions["HMAC_CTX_new"] = []
-        self.ext_functions["EVP_sha1"] = []
+        self.ext_functions = ext_functions
+        self.ignore_vars = ignore_vars
 
         self.incomplete_arrays = {}
         self.name_mapping = name_mapping or NameMap()
@@ -774,21 +784,6 @@ class AST2SDFG:
         used_vars = [
             node for node in walk(node.body) if isinstance(node, DeclRefExpr)
         ]
-
-        var_ext_call = [node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name in self.ext_functions]
-        var_ext_call = sum(var_ext_call, [])
-        var_ext_call = list(filter(lambda x: not isinstance(x, IntLiteral), var_ext_call))
-        var_ext_call = list(map(lambda x: x.name, var_ext_call))
-
-        used_vars_outside = [node for node in walk(node.body, skip_class=CallExpr) if isinstance(node, DeclRefExpr)]
-        used_vars_outside += [node.unprocessed_name for node in walk(node.body, skip_class=CallExpr) if isinstance(node, ArraySubscriptExpr)]
-        used_vars_outside += sum([node.args for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name not in self.ext_functions], [])
-        used_vars_outside = list(filter(lambda x: not isinstance(x, IntLiteral), used_vars_outside))
-        used_vars_outside = list(filter(lambda x: not isinstance(x, StringLiteral), used_vars_outside))
-        print(list(map(lambda x: x.name, used_vars_outside)))
-        used_vars_outside = list(map(lambda x: x.name, used_vars_outside))
-
-        only_ext_call = set(var_ext_call) - set(used_vars_outside)
 
         #print(list(map(lambda x: (x.name, x.type if hasattr(x, "type") else None ), var_decls)))
 

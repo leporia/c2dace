@@ -247,6 +247,43 @@ class MallocForceInitializer(NodeTransformer):
 
         return node
 
+
+class FindIgnoreValues(NodeVisitor):
+    def __init__(self, ext_calls, ignore_values):
+        self.global_ignore = ignore_values
+        self.ignore_values = set()
+        self.all_values = set()
+        self.ext_calls = ext_calls
+    
+    def visit_DeclRefExpr(self, node: DeclRefExpr):
+        self.all_values.add(node.name)
+        return
+
+    def visit_BinOp(self, node: BinOp):
+        if not isinstance(node.rvalue, CallExpr):
+            return self.generic_visit(node)
+
+        if node.rvalue.name.name not in self.ext_calls:
+            return self.generic_visit(node)
+
+        return
+
+    def visit_CallExpr(self, node: CallExpr):
+        if node.name.name not in self.ext_calls:
+            return self.generic_visit(node)
+
+        self.ignore_values |= set([arg.name for arg in filter(lambda x: isinstance(x, DeclRefExpr), node.args)])
+        return
+
+    def visit_FuncDecl(self, node: FuncDecl):
+        self.ignore_values = set()
+        self.all_values = set()
+
+        self.generic_visit(node)
+        self.global_ignore[node.name] = self.ignore_values - self.all_values
+
+        return node
+
 class ArrayPointerExtractorNodeLister(NodeVisitor):
     def __init__(self):
         self.nodes: List[DeclRefExpr] = []
@@ -260,10 +297,13 @@ class ArrayPointerExtractorNodeLister(NodeVisitor):
         return
 
 class ArrayPointerExtractor(NodeTransformer):
-    def __init__(self, global_array_map):
+    def __init__(self, global_array_map, ext_calls, global_ignore_values):
         self.array_map = dict()
+        self.ignore_values = set()
         self.global_array_map = global_array_map
         self.count = 0
+        self.ext_calls = ext_calls
+        self.global_ignore_values = global_ignore_values
 
     def pointer_increment(self, node: BinOp):
         name = node.lvalue.name
@@ -365,6 +405,36 @@ class ArrayPointerExtractor(NodeTransformer):
 
         return self.pointer_increment(node)
 
+    def visit_CallExpr(self, node: CallExpr):
+        if node.name.name not in self.ext_calls:
+            return self.generic_visit(node)
+
+        args = node.args
+        in_out = self.ext_calls[node.name.name]
+
+        for i in range(len(in_out)):
+            if not isinstance(args[i], DeclRefExpr):
+                self.generic_visit(args[i])
+                continue
+
+            arg_name = args[i].name
+
+            if not arg_name in self.array_map:
+                self.generic_visit(args[i])
+                continue
+
+            ptr_name = self.array_map[arg_name]
+            new_arg = ArraySubscriptExpr(
+                    name=args[i].name,
+                    indices=None,
+                    type=args[i].type,
+                    unprocessed_name=args[i],
+                    index=DeclRefExpr(name=ptr_name, type=Int()))
+            args[i] = UnOp(op="&", lvalue=new_arg, postfix=False, name=args[i].name)
+
+        node.args = args
+        return node
+
     def visit_BasicBlock(self, node: BasicBlock):
         newbody = []
 
@@ -373,37 +443,25 @@ class ArrayPointerExtractor(NodeTransformer):
             if not isinstance(child, DeclStmt) or len(child.vardecl) != 1:
                 continue
                 
-            # TODO account for multiple declarations
             vardecl = child.vardecl[0]
 
-            if not hasattr(vardecl, "init"):
+            if not isinstance(vardecl.type, Pointer):
+                continue
+
+            if vardecl.name in self.ignore_values:
                 continue
 
             varname = "tmp_array_ptr_" + vardecl.name + "_" + str(self.count)
 
-            if isinstance(vardecl.init, CallExpr) and isinstance(vardecl.init.name, DeclRefExpr) and vardecl.init.name.name == "malloc":
-                self.array_map[vardecl.name] = varname
-                self.count += 1
-                newbody.append(VarDecl(name=self.array_map[vardecl.name], type=Int(), init=IntLiteral(value="0")))
-                continue
-            
-            expr = vardecl.init
-            while isinstance(expr, ParenExpr):
-                expr = expr.expr
-
-            if isinstance(expr, DeclRefExpr) and expr.name in self.array_map:
-                self.array_map[vardecl.name] = varname
-                self.count += 1
-                newbody.append(VarDecl(name=self.array_map[vardecl.name], type=Int(), init=IntLiteral(value="0")))
-                continue
+            self.array_map[vardecl.name] = varname
+            self.count += 1
+            newbody.append(VarDecl(name=self.array_map[vardecl.name], type=Int(), init=IntLiteral(value="0")))
 
         return BasicBlock(body=newbody)
 
     def visit_FuncDecl(self, node: FuncDecl):
-        if node.name != "main":
-            return node
-
         self.array_map = dict()
+        self.ignore_values = self.global_ignore_values[node.name]
 
         self.generic_visit(node)
         self.global_array_map[node.name] = self.array_map
@@ -717,7 +775,7 @@ class CallExtractor(NodeTransformer):
         else:
             self.count = self.count + 1
         tmp = self.count
-        if node.name.name in ["malloc", "expf", "powf", "sqrt", "cbrt"]:
+        if node.name.name in ["malloc", "expf", "powf", "sqrt", "cbrt"] or node.name.name in self.ext_functions:
             return node
         return DeclRefExpr(name="tmp_call_" + str(tmp - 1))
 
@@ -735,7 +793,6 @@ class CallExtractor(NodeTransformer):
             temp = self.count
             if res is not None:
                 for i in range(0, len(res)):
-                    print("CALL:", res[i].name)
                     newbody.append(
                         DeclStmt(vardecl=[
                             VarDecl(name="tmp_call_" + str(temp),

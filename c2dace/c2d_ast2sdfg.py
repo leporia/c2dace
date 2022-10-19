@@ -619,6 +619,7 @@ class AST2SDFG:
         self.ext_functions = ext_functions
         self.ignore_vars = ignore_vars
 
+        self.current_function = None
         self.incomplete_arrays = {}
         self.name_mapping = name_mapping or NameMap()
         self.arr_start_name_mapping = {}
@@ -666,9 +667,9 @@ class AST2SDFG:
             Long: dace.int32,
             LongLong: dace.int64,
             ULongLong: dace.uint64,
-            Bool: dace.int8,
+            Bool: dace.uint8,
             ULong: dace.uint32,
-            UChar: dace.int8,
+            UChar: dace.uint8,
         }
 
     def translate(self, node: Node, sdfg: SDFG):
@@ -776,6 +777,7 @@ class AST2SDFG:
 
     def funcdecl2sdfg(self, node: FuncDecl, sdfg: SDFG):
         print("FUNC: ", node.name)
+        self.current_function = node.name
 
         if node.body is None:
             print("Empty function")
@@ -1415,6 +1417,8 @@ class AST2SDFG:
                 for i in range(len(node.args)):
                     if (isinstance(node.args[i], DeclRefExpr)):
                         args_in_out[node.args[i].name] = ext_lib_mapping[i]
+
+            text_addins = ""
             
             for i in used_vars:
                 for j in sdfg.arrays:
@@ -1429,12 +1433,16 @@ class AST2SDFG:
 
                         in_out = args_in_out.get(i.name)
                         if in_out is not None:
+                            both = False
                             if "in" in in_out:
                                 input_names.append(j)
                                 input_names_tasklet[i.name] = dace.pointer(elem.dtype)
+                                both = True
                             if "out" in in_out:
                                 output_names.append(j)
                                 output_names_tasklet.append(i.name)
+                                if both:
+                                    text_addins += i.name + "_out = " + i.name + ";\n"
 
                         else:
                             if not scalar and not node.name.name in [
@@ -1511,7 +1519,7 @@ class AST2SDFG:
                 memlet_range = self.get_memlet_range(sdfg, used_vars, i, j)
                 add_memlet_write(substate, i, tasklet, k, memlet_range)
 
-            setattr(tasklet, "code", CodeBlock(text, dace.Language.CPP))
+            setattr(tasklet, "code", CodeBlock(text_addins + text, dace.Language.CPP))
 
     def malloc2sdfg(self, node: BinOp, sdfg: SDFG):
         varname = get_var_name(node.lvalue)
@@ -1730,19 +1738,40 @@ class AST2SDFG:
 
             if self.incomplete_arrays.get((sdfg, i.name)) is not None:
                 rval = node.rvalue
+
+                if isinstance(rval, StringLiteral):
+                    # initialize array with string
+                    print("Completing array", i.name ,"with", rval.value[0])
+                    mapped_name = find_new_array_name(self.all_array_names, i.name)
+                    self.name_mapping[sdfg][i.name] = mapped_name
+                    old_node = self.incomplete_arrays.get((sdfg, i.name))
+                    del self.incomplete_arrays[(sdfg, i.name)]
+
+                    node.lvalue.type = old_node.type
+                    datatype = self.get_dace_type(old_node.type.pointee_type)
+
+                    sdfg.add_array(mapped_name,
+                                shape=[rval.type.size],
+                                dtype=datatype,
+                                transient=True)
+                    self.all_array_names.append(mapped_name)
+                    output_names.append(mapped_name)
+                    output_names_tasklet.append(i.name)
+                    continue
+
                 rval_name = get_var_name(rval)
                 
                 rval_mapped = self.get_name_mapping_in_context(sdfg).get(rval_name)
-                if rval_mapped not in arrays:
+                if rval_mapped in arrays:
+                    print("mapping ", i.name, " to ", rval_mapped)
+                    self.name_mapping[sdfg][i.name] = rval_mapped
+
+                    # no need to create a tasklet because we do a mapping at compile time
+                    return
+                else:
                     # no need to handle this (i think) because we don't have double pointers
                     print("Assigning to incomplete array ", i.name , " with rval ", rval, " ", rval_mapped)
                     continue
-
-                print("mapping ", i.name, " to ", rval_mapped)
-                self.name_mapping[sdfg][i.name] = rval_mapped
-
-                # no need to create a tasklet because we do a mapping at compile time
-                return
 
             if mapped_name in arrays and mapped_name not in output_names:
                 output_names.append(mapped_name)
@@ -1785,6 +1814,14 @@ class AST2SDFG:
             print("applied offset transformation ", oldtext, " => ", text)
 
         # print("BINOPTASKLET:",text)
+        if isinstance(node.rvalue, StringLiteral) and isinstance(node.rvalue.type, ConstantArray):
+            print("string literal, adding cast to ptr")
+            size = node.rvalue.type.size
+            if isinstance(node.lvalue.type.pointee_type, Char):
+                text = text[0:-size-2] + "(char*) " + text[-size-2:]
+            elif isinstance(node.lvalue.type.pointee_type, UChar):
+                text = text[0:-size-2] + "(unsigned char*) " + text[-size-2:]
+
         tasklet.code = CodeBlock(text, dace.Language.CPP)
 
     def declstmt2sdfg(self, node: DeclStmt, sdfg: SDFG):
@@ -1795,6 +1832,7 @@ class AST2SDFG:
         # for i in node.__dict__:
         #    print(i)
         #    print(node.__getattribute__(i))
+        #print("Vardecl ", node.name, " ", node.type, " at ", self.current_function)
         if hasattr(node, "typeref") and len(node.typeref) > 0:
             #print("vardecl typeref",node.typeref[0].name)
             if node.typeref[0].name in self.typedefs:
@@ -1809,16 +1847,20 @@ class AST2SDFG:
                     return
 
             datatype = self.get_dace_type(node.type)
-        if hasattr(node, "sizes"):
+        if isinstance(node.type, ConstantArray):
+            # get static size because is constant
+            sizes = [node.type.size]
+        elif hasattr(node, "sizes"):
             sizes = []
             for i in node.sizes:
                 if isinstance(i, IntLiteral):
-                    print(i.lineno)
-                    print(i.value)
                     if (len(i.value) > 0):
                         sizes.insert(0, i.value[0])
                     else:
-                        print("fail!!")
+                        print(i.lineno)
+                        print(i.value)
+                        raise RuntimeError("IntLiteral value is invalid!!")
+
                 elif isinstance(i, BinOp):
                     tw = TaskletWriter([], [])
                     text = tw.write_tasklet_code(i)
@@ -1827,6 +1869,7 @@ class AST2SDFG:
                     print("Size:", i.__class__.__name__)
         else:
             sizes = [1]
+
         self.name_mapping[sdfg][node.name] = find_new_array_name(
             self.all_array_names, node.name)
         if len(sizes) == 0 or (len(sizes) == 1 and sizes[0] == 1):
@@ -1849,6 +1892,7 @@ class AST2SDFG:
         # for i in node.__dict__:
         #    print("PARMDECL: ",i)
         #    print(node.__getattribute__(i))
+        #print("Paramdecl ", node.name, " ", node.type, " at ", self.current_function)
         if hasattr(node, "typeref") and len(node.typeref) > 0:
             #    print("parmdecl typeref",node.typeref[0].name)
             datatype = self.typedefs[node.typeref[0].name]
@@ -1856,7 +1900,11 @@ class AST2SDFG:
             # print("vardecl type",node.type)
 
             datatype = self.get_dace_type(node.type)
-        if hasattr(node, "sizes"):
+
+        if isinstance(node.type, ConstantArray):
+            # get static size because is constant
+            sizes = [node.type.size]
+        elif hasattr(node, "sizes"):
             if len(node.sizes) == 0:
                 scalar = True
             else:

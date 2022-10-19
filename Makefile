@@ -11,7 +11,7 @@ clean:
 	rm -Rf tmp/* .dacecache _dacegraphs a.out orig
 
 compile:
-	gcc .dacecache/$(FILENAME2)/sample/$(FILENAME2)_main.cpp .dacecache/$(FILENAME2)/src/cpu/$(FILENAME2).cpp -I $(DACE_INCLUDE) -lstdc++ -lm -ggdb
+	gcc .dacecache/$(FILENAME2)/sample/$(FILENAME2)_main.cpp .dacecache/$(FILENAME2)/src/cpu/$(FILENAME2).cpp -I $(DACE_INCLUDE) -lstdc++ -lm -lcrypto -ggdb
 
 test:
 	python3 testing/harness.py

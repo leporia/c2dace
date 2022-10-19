@@ -58,8 +58,6 @@ int pbkdf2_derive(const char *pass, size_t passlen,
         else
             cplen = tkeylen;
         
-        printf("tkeylen: %d, cplen: %d\n", tkeylen, cplen);
-
         /*
          * We are unlikely to ever use more than 256 blocks (5120 bits!) but
          * just in case...
@@ -73,9 +71,6 @@ int pbkdf2_derive(const char *pass, size_t passlen,
         HMAC_Update(hctx, salt, saltlen);
         HMAC_Update(hctx, itmp, 4);
         HMAC_Final(hctx, digtmp, 0);
-
-        printf("pass: %s, salt: %s, itmp: %hhx %hhx %hhx %hhx\n", pass, salt, itmp[0], itmp[1], itmp[2], itmp[3]);
-        printf("%hhx %hhx %hhx %hhx\n", digtmp[0], digtmp[1], digtmp[2], digtmp[3]);
 
         memcpy(p, digtmp, cplen);
 
@@ -104,17 +99,17 @@ int main(int argc, char** argv) {
     char *pass = "password";
     unsigned char *salt = "salt";
     int iter=4096;
-    unsigned char result[20];
+    unsigned char result[80];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
-    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, 19, 0);
+    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, 79, 0);
 
     if (!success) {
         printf("error\n");
         return 1;
     }
 
-    for (int i=0; i<20; i++) {
+    for (int i=0; i<79; i++) {
         printf("%hhx", result[i]);
     }
     printf("\n");

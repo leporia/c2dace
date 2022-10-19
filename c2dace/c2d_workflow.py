@@ -187,7 +187,6 @@ def c2d_workflow(_dir,
     ext_functions["HMAC_CTX_free"] = ["in"]
     ext_functions["HMAC_CTX_new"] = []
     ext_functions["EVP_sha1"] = []
-    ext_functions["memcpy"] = ["out", "in", "in"]
 
     ignore_values = dict()
     FindIgnoreValues(ext_functions, ignore_values).visit(changed_ast)
@@ -203,7 +202,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == CallExtractor:
+            if transformation == ParenExprRemover:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:

@@ -351,6 +351,47 @@ class ArrayPointerExtractor(NodeTransformer):
         binop = BinOp(op="=", lvalue=lval, rvalue=pointer_binop)
 
         return binop
+    
+    def memcpy_transform(self, node: CallExpr):
+        args = node.args
+        iterator_name = "memcpy_iterator_" + str(self.count)
+        self.count += 1
+        lval_ptr = self.array_map.get(args[0].name)
+        rval_ptr = self.array_map.get(args[1].name)
+
+        if lval_ptr is None:
+            lval_index = DeclRefExpr(name=iterator_name, type=Int())
+        else:
+            lval_index = BinOp(op="+", lvalue=DeclRefExpr(name=iterator_name, type=Int()), rvalue=DeclRefExpr(name=lval_ptr, type=Int()))
+
+        if rval_ptr is None:
+            rval_index = DeclRefExpr(name=iterator_name, type=Int())
+        else:
+            rval_index = BinOp(op="+", lvalue=DeclRefExpr(name=iterator_name, type=Int()), rvalue=DeclRefExpr(name=rval_ptr, type=Int()))
+
+        lval = ArraySubscriptExpr(
+            name=args[0].name,
+            indices=None,
+            type=args[0].type,
+            unprocessed_name=args[0],
+            index=lval_index
+        )
+
+        rval = ArraySubscriptExpr(
+            name=args[1].name,
+            indices=None,
+            type=args[1].type,
+            unprocessed_name=args[1],
+            index=rval_index
+        )
+
+        body = [BinOp(op="=", lvalue=lval, rvalue=rval)]
+        body = [BasicBlock(body=body)]
+        incr = [BinOp(op="=", lvalue=DeclRefExpr(name=iterator_name, type=Int()), rvalue=BinOp(op="+", lvalue=DeclRefExpr(name=iterator_name, type=Int()), rvalue=IntLiteral(value="1")))]
+        cond = [BinOp(op="<", lvalue=DeclRefExpr(name=iterator_name, type=Int()), rvalue=args[2])]
+        init = [DeclStmt(vardecl=[VarDecl(name=iterator_name, type=Int(), init=IntLiteral(value="0"))])]
+
+        return ForStmt(init=init, cond=cond, body=body, iter=incr)
 
     def visit_ArraySubscriptExpr(self, node: ArraySubscriptExpr):
         if isinstance(node.unprocessed_name, ParenExpr):
@@ -406,6 +447,9 @@ class ArrayPointerExtractor(NodeTransformer):
         return self.pointer_increment(node)
 
     def visit_CallExpr(self, node: CallExpr):
+        if node.name.name == "memcpy":
+            return self.memcpy_transform(node)
+
         if node.name.name not in self.ext_calls:
             return self.generic_visit(node)
 

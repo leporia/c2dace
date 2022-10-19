@@ -1731,6 +1731,7 @@ class AST2SDFG:
         output_vars = outputnodefinder.nodes
         output_names = []
         output_names_tasklet = []
+        string_literal_init = False
 
         for i in output_vars:
             arrays = self.get_arrays_in_context(sdfg)
@@ -1742,6 +1743,7 @@ class AST2SDFG:
                 if isinstance(rval, StringLiteral):
                     # initialize array with string
                     print("Completing array", i.name ,"with", rval.value[0])
+                    string_literal_init = True
                     mapped_name = find_new_array_name(self.all_array_names, i.name)
                     self.name_mapping[sdfg][i.name] = mapped_name
                     old_node = self.incomplete_arrays.get((sdfg, i.name))
@@ -1801,8 +1803,13 @@ class AST2SDFG:
             memlet_range = self.get_memlet_range(sdfg, output_vars, i, j)
             add_memlet_write(substate, i, tasklet, k, memlet_range)
 
-        tw = TaskletWriter(output_names_tasklet, output_names_changed)
-        text = tw.write_tasklet_code(node) + ";"
+        if string_literal_init:
+            str_lit = node.rvalue.value[0][1:-1]
+            out_name = output_names_changed[0]
+            text = " ".join([out_name + "[" + str(i) + "] = '" + v + "';" for i, v in enumerate(str_lit)])
+        else:
+            tw = TaskletWriter(output_names_tasklet, output_names_changed)
+            text = tw.write_tasklet_code(node) + ";"
         #print("BINOP:",output_names_tasklet,output_names_changed, " > ",text)
         
         # remove offset that was already applied
@@ -1814,14 +1821,6 @@ class AST2SDFG:
             print("applied offset transformation ", oldtext, " => ", text)
 
         # print("BINOPTASKLET:",text)
-        if isinstance(node.rvalue, StringLiteral) and isinstance(node.rvalue.type, ConstantArray):
-            print("string literal, adding cast to ptr")
-            size = node.rvalue.type.size
-            if isinstance(node.lvalue.type.pointee_type, Char):
-                text = text[0:-size-2] + "(char*) " + text[-size-2:]
-            elif isinstance(node.lvalue.type.pointee_type, UChar):
-                text = text[0:-size-2] + "(unsigned char*) " + text[-size-2:]
-
         tasklet.code = CodeBlock(text, dace.Language.CPP)
 
     def declstmt2sdfg(self, node: DeclStmt, sdfg: SDFG):

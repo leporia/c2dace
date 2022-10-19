@@ -247,6 +247,35 @@ class MallocForceInitializer(NodeTransformer):
 
         return node
 
+class FindPtrAliases(NodeVisitor):
+    def __init__(self, ptr_aliases):
+        self.global_aliases = ptr_aliases
+        self.ptr_aliases = dict()
+
+    def visit_BinOp(self, node: BinOp):
+        if node.op != "=":
+            return
+
+        if not isinstance(node.lvalue, DeclRefExpr) or not isinstance(node.rvalue, DeclRefExpr):
+            return
+
+        if not isinstance(node.lvalue.type, Pointer) or not isinstance(node.rvalue.type, Pointer):
+            return
+
+        if node.lvalue.type != node.rvalue.type:
+            return
+
+        self.ptr_aliases[node.lvalue.name] = node.rvalue.name
+
+        return
+
+    def visit_FuncDecl(self, node: FuncDecl):
+        self.ptr_aliases = dict()
+
+        self.generic_visit(node)
+        self.global_aliases[node.name] = self.ptr_aliases
+
+        return
 
 class FindIgnoreValues(NodeVisitor):
     def __init__(self, ext_calls, ignore_values):

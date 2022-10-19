@@ -5,7 +5,7 @@ int main(int argc, char *argv[])
   char pass[]="password";
   char salt[] = "salt";
   int iter=4096;
-  int key_length = 128;
+  int key_length = 64;
   char result[key_length];
   int success = PKCS5_PBKDF2_HMAC(pass, sizeof(pass) -1, salt, sizeof(salt)-1, iter, EVP_sha1(), key_length , result);
 

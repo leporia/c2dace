@@ -602,7 +602,8 @@ class AST2SDFG:
             start_function="main",
             name_mapping=None,
             ext_functions={},
-            ignore_vars={}):
+            ignore_vars={},
+            ptr_aliases={}):
         self.start_function = start_function
         self.last_sdfg_states = {}
         self.loop_depth = -1
@@ -618,6 +619,7 @@ class AST2SDFG:
 
         self.ext_functions = ext_functions
         self.ignore_vars = ignore_vars
+        self.ptr_aliases = ptr_aliases
 
         self.current_function = None
         self.incomplete_arrays = {}
@@ -832,7 +834,12 @@ class AST2SDFG:
         read_names = []
 
         for i in write_vars:
-            write_names.append(get_var_name(i))
+            name = get_var_name(i)
+            write_names.append(name)
+
+            alias = self.ptr_aliases.get(node.name).get(name)
+            if alias is not None:
+                write_names.append(alias)
         for i in read_vars:
             read_names.append(get_var_name(i))
 

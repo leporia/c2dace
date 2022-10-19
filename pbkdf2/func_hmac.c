@@ -88,7 +88,6 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     }
     ret = 1;
 
-    key[0] = 0; // tmp, do alias analysis
     HMAC_CTX_free(hctx);
     HMAC_CTX_free(hctx_tpl);
     return ret;
@@ -99,17 +98,17 @@ int main(int argc, char** argv) {
     char *pass = "password";
     unsigned char *salt = "salt";
     int iter=4096;
-    unsigned char result[80];
+    unsigned char result[64];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
-    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, 79, 0);
+    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, 64, 0);
 
     if (!success) {
         printf("error\n");
         return 1;
     }
 
-    for (int i=0; i<79; i++) {
+    for (int i=0; i<64; i++) {
         printf("%hhx", result[i]);
     }
     printf("\n");

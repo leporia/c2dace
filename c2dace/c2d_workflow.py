@@ -192,6 +192,10 @@ def c2d_workflow(_dir,
     FindIgnoreValues(ext_functions, ignore_values).visit(changed_ast)
     print("Ignored values from ext functions: ", ignore_values)
 
+    ptr_aliases = dict()
+    FindPtrAliases(ptr_aliases).visit(changed_ast)
+    print("Pointer aliases: ", ptr_aliases)
+
     transformation_args = {
         ArrayPointerExtractor: [global_array_map, ext_functions, ignore_values],
         ArrayPointerReset: [global_array_map],
@@ -256,7 +260,7 @@ def c2d_workflow(_dir,
         DeclRefExpr(name="c2d_retval")
     ]
     translator = AST2SDFG(last_call_expression, globalsdfg, "main",
-                          name_mapping, ext_functions, ignore_values)
+                          name_mapping, ext_functions, ignore_values, ptr_aliases)
 
     translator.translate(changed_ast, globalsdfg)
 

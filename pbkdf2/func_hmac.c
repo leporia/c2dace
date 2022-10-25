@@ -98,17 +98,18 @@ int main(int argc, char** argv) {
     char *pass = "password";
     unsigned char *salt = "salt";
     int iter=4096;
-    unsigned char result[64];
+    long key_length = 100;
+    unsigned char result[100];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
-    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, 64, 0);
+    int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, key_length, 0);
 
     if (!success) {
         printf("error\n");
         return 1;
     }
 
-    for (int i=0; i<64; i++) {
+    for (long i=0; i<key_length; i++) {
         printf("%hhx", result[i]);
     }
     printf("\n");

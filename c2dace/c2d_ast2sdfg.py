@@ -996,8 +996,10 @@ class AST2SDFG:
                                                  outs_in_new_sdfg,
                                                  symbol_mapping=sym_dict)
 
+        global_out_var_names = []
         for i in self.libstates:
             memlet = "0"
+            global_out_var_names.append(self.name_mapping[sdfg][i])
             add_memlet_write(substate, self.name_mapping[sdfg][i],
                              internal_sdfg, self.name_mapping[new_sdfg][i],
                              memlet)
@@ -1030,6 +1032,7 @@ class AST2SDFG:
             else:
                 memlet = generate_memlet(i, sdfg, self)
             if local_name.name in write_names:
+                global_out_var_names.append(mapped_name)
                 add_memlet_write(substate, mapped_name, internal_sdfg,
                                  self.name_mapping[new_sdfg][local_name.name],
                                  memlet)
@@ -1054,6 +1057,21 @@ class AST2SDFG:
                     final_state) not in new_sdfg._edges:
                 new_sdfg.add_edge(self.last_sdfg_states[new_sdfg], final_state,
                                   dace.InterstateEdge())
+
+        if (node.name == self.start_function):
+            print("is start function!")
+            print(global_out_var_names)
+            exit_state = add_simple_state_to_sdfg(self, sdfg, "exitstate")
+
+            sdfg.add_array("__return",
+                           shape=(1, ),
+                           dtype=dace.int32,
+                           transient=False)
+
+            tasklet = add_tasklet(exit_state, "finish_tasklet", ["ret_val", "print"], ["ret"], "ret = ret_val + print;")
+            add_memlet_read(exit_state, "c2d_retval", tasklet, "ret_val", "0")
+            add_memlet_read(exit_state, "print", tasklet, "print", "0")
+            add_memlet_write(exit_state, "__return", tasklet, "ret", "0")
 
         print("ENDF: ", node.name)
 

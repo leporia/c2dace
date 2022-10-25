@@ -181,7 +181,7 @@ def c2d_workflow(_dir,
     ext_functions = {}
     ext_functions["HMAC_Init_ex"] = ["in/out", "in", "in", "in", "in"]
     #ext_functions["HMAC_CTX_copy"] = ["in/out", "in"]
-    ext_functions["HMAC_CTX_copy"] = ["in/out", "in/out"] # TODO this is wrong but otherwise is selected as const
+    ext_functions["HMAC_CTX_copy"] = ["in/out", "in"]
     ext_functions["HMAC_Update"] = ["in/out", "in", "in"]
     ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
     ext_functions["HMAC_CTX_free"] = ["in"]
@@ -206,7 +206,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == ParenExprRemover:
+            if transformation == UnaryExtractor:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -296,11 +296,12 @@ def c2d_workflow(_dir,
                 with open("tmp/middle_code.cc", 'w') as fp:
                     fp.write(codeobj.clean_code)
 
-        globalsdfg.compile()
+        #globalsdfg.compile()
         #return
 
-    globalsdfg.simplify()
+    globalsdfg.simplify(verbose=debug)
     globalsdfg.save("tmp/" + filecore + "-simplified.sdfg")
+
     globalsdfg.apply_transformations_repeated(PruneConnectors)
     xfh.split_interstate_edges(globalsdfg)
     propagate_memlets_sdfg(globalsdfg)
@@ -318,8 +319,9 @@ def c2d_workflow(_dir,
     ]
 
     for i in range(4):
+        #globalsdfg.save("tmp/pre.sdfg")
         propagate_memlets_sdfg(globalsdfg)
-        globalsdfg.simplify()
+        globalsdfg.simplify(verbose=debug)
         xforms = globalsdfg.apply_transformations_repeated(xform_types,
                                                            validate_all=True)
 
@@ -331,7 +333,6 @@ def c2d_workflow(_dir,
                 xfh.split_interstate_edges(sd)
             num = globalsdfg.apply_transformations_repeated(RefineNestedAccess)
             print("Refine nested acesses:", num)
-            globalsdfg.save("tmp/pre.sdfg")
             l2ms = globalsdfg.apply_transformations_repeated(LoopToMap, validate=False)
             transformed = l2ms > 0
 

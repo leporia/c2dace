@@ -938,11 +938,12 @@ class CondExtractor(NodeTransformer):
             self.count = self.count + 1
         tmp = self.count
 
-        cond = [
-            BinOp(op="!=",
-                  lvalue=DeclRefExpr(name="tmp_if_" + str(tmp - 1)),
-                  rvalue=IntLiteral(value="0"))
-        ]
+        #cond = [
+        #    BinOp(op="!=",
+        #          lvalue=DeclRefExpr(name="tmp_if_" + str(tmp - 1)),
+        #          rvalue=IntLiteral(value="0"))
+        #]
+        cond = [DeclRefExpr(name="tmp_if_" + str(tmp - 1))]
         body_if = [self.visit(node.body_if[0])]
         if hasattr(node, "body_else"):
             body_else = [self.visit(node.body_else[0])]

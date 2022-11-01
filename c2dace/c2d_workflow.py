@@ -206,7 +206,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == UnaryExtractor:
+            if transformation == UnaryToBinary:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:

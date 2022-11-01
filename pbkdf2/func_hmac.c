@@ -52,6 +52,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     HMAC_Init_ex(hctx_tpl, pass, passlen, EVP_sha1(), 0);
     hctx = HMAC_CTX_new();
 
+    //for (int tkeylen = keylen; tkeylen > 0; tkeylen -= 20) {
     while (tkeylen) {
         if (tkeylen > mdlen)
             cplen = mdlen;

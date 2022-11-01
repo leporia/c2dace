@@ -25,7 +25,7 @@ class UnaryExtractor(NodeTransformer):
 
     def visit_ForStmt(self, node: ForStmt):
         return ForStmt(init=node.init,
-                       body=self.generic_visit(node.body[0]),
+                       body=self.visit(node.body[0]),
                        cond=node.cond,
                        iter=node.iter)
 
@@ -39,6 +39,10 @@ class UnaryExtractor(NodeTransformer):
     def visit_BasicBlock(self, node: BasicBlock):
         newbody = []
         for child in node.body:
+            if isinstance(child, ForStmt):
+                newbody.append(self.visit(child))
+                continue
+
             lister = UnaryExtractorNodeLister()
             lister.visit(child)
             res = lister.nodes
@@ -65,7 +69,7 @@ class UnaryExtractor(NodeTransformer):
                     tmp_count = tmp_count + 1
             if isinstance(child, UnOp):
                 newbody.append(
-                    UnOp(op=child.op, lvalue=self.visit(child.lvalue)))
+                    UnOp(op=child.op, lvalue=self.visit(child.lvalue), postfix=child.postfix))
             else:
                 newbody.append(self.visit(child))
             for i in post:

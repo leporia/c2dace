@@ -613,8 +613,13 @@ class AST2SDFG:
         self.function_names = {}
         self.typedefs = {}
         self.libraries = {}
-        self.libraries["printf"] = "print"
-        self.libraries["fprintf"] = "print"
+
+        # library functions are defined as follows
+        # (is_global, global name or postfix for non global, read, write)
+        self.libraries["printf"] = (True, "print", True, True)
+        self.libraries["fprintf"] = (True, "print", True, True)
+
+        # global names
         self.libstates = ["print"]
 
         self.ext_functions = ext_functions
@@ -1424,14 +1429,29 @@ class AST2SDFG:
             output_names = []
             special_list_in = {}
             special_list_out = []
+            libstate_var_name = ""
             if libstate is not None:
                 #print("LIBSTATE:", libstate)
-                special_list_in[self.name_mapping[sdfg][libstate] +
-                                "_task"] = dace.pointer(
-                                    sdfg.arrays.get(self.name_mapping[sdfg]
-                                                    [libstate]).dtype)
-                special_list_out.append(self.name_mapping[sdfg][libstate] +
-                                        "_task_out")
+
+                # global lib state
+                if libstate[0]:
+                    libstate_var_name = libstate[1] 
+                    # read
+                    if libstate[2]:
+                        special_list_in[self.name_mapping[sdfg][libstate_var_name] +
+                                        "_task"] = dace.pointer(
+                                            sdfg.arrays.get(self.name_mapping[sdfg]
+                                                            [libstate_var_name]).dtype)
+                    
+                    # write
+                    if libstate[3]:
+                        special_list_out.append(self.name_mapping[sdfg][libstate_var_name] +
+                                                "_task_out")
+
+                else:
+                    # non global
+                    print("Warning not implemented non global libstate")
+
             used_vars = [
                 node for node in walk(node) if isinstance(node, DeclRefExpr)
             ]
@@ -1519,14 +1539,16 @@ class AST2SDFG:
                 **special_list_in
             }, output_names_changed + special_list_out, "text")
             if libstate is not None:
-                add_memlet_read(substate, self.name_mapping[sdfg][libstate],
-                                tasklet,
-                                self.name_mapping[sdfg][libstate] + "_task",
-                                "0")
+                if libstate[2]:
+                    add_memlet_read(substate, self.name_mapping[sdfg][libstate_var_name],
+                                    tasklet,
+                                    self.name_mapping[sdfg][libstate_var_name] + "_task",
+                                    "0")
 
-                add_memlet_write(
-                    substate, self.name_mapping[sdfg][libstate], tasklet,
-                    self.name_mapping[sdfg][libstate] + "_task_out", "0")
+                if libstate[3]:
+                    add_memlet_write(
+                        substate, self.name_mapping[sdfg][libstate_var_name], tasklet,
+                        self.name_mapping[sdfg][libstate_var_name] + "_task_out", "0")
             if not isinstance(rettype, Void) and hasret:
                 if ext_lib_mapping is None:
                     add_memlet_read(substate, self.name_mapping[sdfg][retval.name],

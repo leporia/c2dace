@@ -72,6 +72,7 @@ def c2d_workflow(_dir,
                  verbose=False,
                  print_ast=False):
     dace.Config.set("compiler", "default_data_types", value="C")
+    dace.Config.set("compiler", "cpu", "libs", value="crypto")
 
     filename = _dir + "/" + filecore + fileextension
 
@@ -180,7 +181,6 @@ def c2d_workflow(_dir,
 
     ext_functions = {}
     ext_functions["HMAC_Init_ex"] = ["in/out", "in", "in", "in", "in"]
-    #ext_functions["HMAC_CTX_copy"] = ["in/out", "in"]
     ext_functions["HMAC_CTX_copy"] = ["in/out", "in"]
     ext_functions["HMAC_Update"] = ["in/out", "in", "in"]
     ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
@@ -355,5 +355,16 @@ def c2d_workflow(_dir,
         if codeobj.title == 'Frame':
             with open("tmp/" + filecore + '-dace.cc', 'w') as fp:
                 fp.write(codeobj.clean_code)
+
+    #globalsdfg.instrument = dace.InstrumentationType.Timer
+    #counter = 0
+    #for state in globalsdfg.nodes():
+    #    print(counter, state)
+    #    counter += 1
+    #    state.instrument = dace.InstrumentationType.Timer
+
+    #globalsdfg()
+    #report = globalsdfg.get_latest_report()
+    #print(report)
 
     globalsdfg.compile()

@@ -1059,19 +1059,19 @@ class AST2SDFG:
                                   dace.InterstateEdge())
 
         if (node.name == self.start_function):
-            print("is start function!")
-            print(global_out_var_names)
             exit_state = add_simple_state_to_sdfg(self, sdfg, "exitstate")
 
             sdfg.add_array("__return",
                            shape=(1, ),
                            dtype=dace.int32,
-                           transient=False)
+                           transient=True)
 
-            tasklet = add_tasklet(exit_state, "finish_tasklet", ["ret_val", "print"], ["ret"], "ret = ret_val + print;")
-            add_memlet_read(exit_state, "c2d_retval", tasklet, "ret_val", "0")
-            add_memlet_read(exit_state, "print", tasklet, "print", "0")
+            out_names = [i + "_out" for i in global_out_var_names]
+            tasklet = add_tasklet(exit_state, "finish_tasklet", out_names, ["ret"], "ret = " + " + ".join(out_names) + ";")
             add_memlet_write(exit_state, "__return", tasklet, "ret", "0")
+
+            for i in global_out_var_names:
+                add_memlet_read(exit_state, i, tasklet, i+"_out", "0")
 
         print("ENDF: ", node.name)
 
@@ -1497,8 +1497,9 @@ class AST2SDFG:
             tw = TaskletWriter(output_names_tasklet.copy(),
                                output_names_changed.copy())
             if not isinstance(rettype, Void) and hasret:
-                special_list_in[retval.name] = dace.pointer(
-                    self.get_dace_type(rettype))
+                if ext_lib_mapping is None:
+                    special_list_in[retval.name] = dace.pointer(
+                        self.get_dace_type(rettype))
                 # special_list_in.append(retval.name)
                 special_list_out.append(retval.name + "_out")
                 tw.outputs.append(retval.name)
@@ -1527,8 +1528,9 @@ class AST2SDFG:
                     substate, self.name_mapping[sdfg][libstate], tasklet,
                     self.name_mapping[sdfg][libstate] + "_task_out", "0")
             if not isinstance(rettype, Void) and hasret:
-                add_memlet_read(substate, self.name_mapping[sdfg][retval.name],
-                                tasklet, retval.name, "0")
+                if ext_lib_mapping is None:
+                    add_memlet_read(substate, self.name_mapping[sdfg][retval.name],
+                                    tasklet, retval.name, "0")
 
                 add_memlet_write(substate,
                                  self.name_mapping[sdfg][retval.name], tasklet,

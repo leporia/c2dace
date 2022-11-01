@@ -97,9 +97,9 @@ int main(int argc, char** argv) {
 
     char *pass = "password";
     unsigned char *salt = "salt";
-    int iter=4096;
-    long key_length = 100;
-    unsigned char result[100];
+    int iter=1048576;
+    long key_length = 80;
+    unsigned char result[80];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
     int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, key_length, 0);

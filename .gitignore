@@ -138,3 +138,6 @@ _dacegraphs
 # compiled binaries
 a.out
 **/a.out
+
+# vs code
+settings.json

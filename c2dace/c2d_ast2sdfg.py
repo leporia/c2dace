@@ -125,6 +125,36 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
         if state.name_mapping.get(top_sdfg).get(get_var_name(i)) in top_sdfg.arrays:
             read_names.append(get_var_name(i))
 
+    libstate_calls = [
+        (node, state.libraries[node.name.name])
+        for node in walk(node.body)
+        if isinstance(node, CallExpr) and
+            node.name.name in state.libraries and
+            state.libraries[node.name.name][0] == False
+    ]
+
+    for call, libstate in libstate_calls:
+        if libstate[4] == -1:
+            # TODO implement me
+            raise_exception("Libstate return type not implemented")
+        else:
+            basename = call.args[libstate[4]].name
+
+        libstate_var = state.libstate_mapping.get(top_sdfg).get(basename)
+
+        if state.name_mapping.get(top_sdfg).get(libstate_var) in top_sdfg.arrays:
+            if libstate[2]:
+                read_names.append(libstate_var)
+
+            if libstate[3]:
+                write_names.append(libstate_var)
+            
+            if libstate[2] or libstate[3]:
+                used_variables.append(DeclRefExpr(name=libstate_var))
+                if state.libstate_mapping.get(new_sdfg) is None:
+                    state.libstate_mapping[new_sdfg] = {}
+                state.libstate_mapping[new_sdfg][basename] = libstate_var
+
     for i in top_sdfg.arrays:
         found = False
         for j in used_variables:
@@ -615,12 +645,18 @@ class AST2SDFG:
         self.libraries = {}
 
         # library functions are defined as follows
-        # (is_global, global name or postfix for non global, read, write)
-        self.libraries["printf"] = (True, "print", True, True)
-        self.libraries["fprintf"] = (True, "print", True, True)
+        # (is_global, global name or postfix for non global, read, write, attach argument index (only for non global) -1 is the return value)
+        self.libraries["printf"] = (True, "print", True, True, None)
+        self.libraries["fprintf"] = (True, "print", True, True, None)
+        self.libraries["HMAC_CTX_new"] = (False, "_ptr_init", False, True, -1)
+        self.libraries["HMAC_CTX_copy"] = (False, "_ptr_init", True, False, 0)
+        self.libraries["HMAC_Init_ex"] = (False, "_ptr_init", True, False, 0)
 
         # global names
         self.libstates = ["print"]
+
+        self.libstate_mapping = {}
+        self.libstate_mapping[globalsdfg] = {}
 
         self.ext_functions = ext_functions
         self.ignore_vars = ignore_vars
@@ -854,6 +890,36 @@ class AST2SDFG:
         variables_in_call = []
         if self.last_call_expression.get(sdfg) is not None:
             variables_in_call = self.last_call_expression[sdfg]
+
+        if self.libstate_mapping.get(sdfg) is not None:
+            libstate_calls = [
+                (node, self.libraries[node.name.name])
+                for node in walk(node.body)
+                if isinstance(node, CallExpr) and
+                    node.name.name in self.libraries and
+                    self.libraries[node.name.name][0] == False
+            ]
+
+            for call, libstate in libstate_calls:
+                if libstate[4] == -1:
+                    # TODO implement me
+                    raise_exception("Libstate return type not implemented")
+                else:
+                    basename = call.args[libstate[4]].name
+
+                libstate_var = self.libstate_mapping.get(sdfg).get(basename)
+
+                if self.name_mapping.get(sdfg).get(libstate_var) in sdfg.arrays:
+                    if libstate[2]:
+                        read_names.append(libstate_var)
+
+                    if libstate[3]:
+                        write_names.append(libstate_var)
+                    
+                    if libstate[2] or libstate[3]:
+                        if self.libstate_mapping.get(new_sdfg) is None:
+                            self.libstate_mapping[new_sdfg] = {}
+                        self.libstate_mapping[new_sdfg][basename] = libstate_var
 
         inouts_in_new_sdfg = []
         ins_in_new_sdfg = []
@@ -1430,6 +1496,7 @@ class AST2SDFG:
             special_list_in = {}
             special_list_out = []
             libstate_var_name = ""
+            base_name = ""
             if libstate is not None:
                 #print("LIBSTATE:", libstate)
 
@@ -1450,7 +1517,38 @@ class AST2SDFG:
 
                 else:
                     # non global
-                    print("Warning not implemented non global libstate")
+                    if libstate[4] == -1:
+                        # retval
+                        base_name = retval.name
+                    else:
+                        # argument
+                        base_name = node.args[libstate[4]].name
+
+                    if self.libstate_mapping.get(sdfg) is None:
+                        self.libstate_mapping[sdfg] = {}
+
+                    libstate_var_name = self.libstate_mapping.get(sdfg).get(base_name)
+                    if libstate_var_name is None:
+                        libstate_var_name = base_name + libstate[1]
+                        self.libstate_mapping[sdfg][base_name] = libstate_var_name
+                        mapped_name = find_new_array_name(self.all_array_names, libstate_var_name)
+                        self.name_mapping[sdfg][libstate_var_name] = mapped_name
+                        base_array = sdfg.arrays.get(self.name_mapping[sdfg][base_name])
+                        sdfg.add_scalar(mapped_name,
+                                    dtype=base_array.dtype,
+                                    transient=True)
+                        self.all_array_names.append(mapped_name)
+
+                    mapped_name = self.get_name_mapping_in_context(sdfg).get(libstate_var_name)
+
+                    # read
+                    if libstate[2]:
+                        special_list_in[mapped_name + "_task"] = dace.pointer(
+                                            sdfg.arrays.get(self.name_mapping[sdfg]
+                                                            [libstate_var_name]).dtype)
+                    # write
+                    if libstate[3]:
+                        special_list_out.append(mapped_name + "_task_out")
 
             used_vars = [
                 node for node in walk(node) if isinstance(node, DeclRefExpr)
@@ -1463,7 +1561,8 @@ class AST2SDFG:
                     if (isinstance(node.args[i], DeclRefExpr)):
                         args_in_out[node.args[i].name] = ext_lib_mapping[i]
 
-            text_addins = ""
+            text_pre = ""
+            text_post = "\n"
             
             for i in used_vars:
                 for j in sdfg.arrays:
@@ -1487,7 +1586,7 @@ class AST2SDFG:
                                 output_names.append(j)
                                 output_names_tasklet.append(i.name)
                                 if both:
-                                    text_addins += i.name + "_out = " + i.name + ";\n"
+                                    text_pre += i.name + "_out = " + i.name + ";\n"
 
                         else:
                             if not scalar and not node.name.name in [
@@ -1503,6 +1602,16 @@ class AST2SDFG:
 
                             input_names_tasklet[i.name] = dace.pointer(elem.dtype)
                             input_names.append(j)
+
+                        if libstate is not None and base_name != "" and base_name == i.name:
+                            libstate_var_name = self.libstate_mapping.get(sdfg).get(base_name)
+
+                            if libstate[2]:
+                                text_pre += i.name + "_out" + " = " + self.name_mapping.get(sdfg).get(libstate_var_name) + "_task" + ";\n"
+
+                            if libstate[3]:
+                                text_post += self.name_mapping[sdfg][libstate_var_name] + "_task_out" + \
+                                    " = " + i.name + "_out" + ";\n"
 
             output_names_changed = []
             for o, o_t in zip(output_names, output_names_tasklet):
@@ -1526,6 +1635,10 @@ class AST2SDFG:
                 tw.outputs_changes.append(retval.name + "_out")
                 text = tw.write_tasklet_code(
                     BinOp(lvalue=retval, op="=", rvalue=node)) + ";"
+
+                if libstate is not None and libstate[4] == -1 and libstate[3]:
+                    text_post += self.name_mapping[sdfg][libstate_var_name] + "_task_out" + \
+                        " = " + retval.name + "_out" + ";\n"
 
             else:
                 text = tw.write_tasklet_code(node) + ";"
@@ -1568,7 +1681,7 @@ class AST2SDFG:
                 memlet_range = self.get_memlet_range(sdfg, used_vars, i, j)
                 add_memlet_write(substate, i, tasklet, k, memlet_range)
 
-            setattr(tasklet, "code", CodeBlock(text_addins + text, dace.Language.CPP))
+            setattr(tasklet, "code", CodeBlock(text_pre + text + text_post, dace.Language.CPP))
 
     def malloc2sdfg(self, node: BinOp, sdfg: SDFG):
         varname = get_var_name(node.lvalue)

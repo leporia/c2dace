@@ -180,10 +180,10 @@ def c2d_workflow(_dir,
     global_array_map = dict()
 
     ext_functions = {}
-    ext_functions["HMAC_Init_ex"] = ["in/out", "in", "in", "in", "in"]
-    ext_functions["HMAC_CTX_copy"] = ["in/out", "in"]
+    ext_functions["HMAC_Init_ex"] = ["out", "in", "in", "in", "in"]
+    ext_functions["HMAC_CTX_copy"] = ["out", "in"]
     ext_functions["HMAC_Update"] = ["in/out", "in", "in"]
-    ext_functions["HMAC_Final"] = ["in/out", "out", "in"]
+    ext_functions["HMAC_Final"] = ["in", "out", "in"]
     ext_functions["HMAC_CTX_free"] = ["in"]
     ext_functions["HMAC_CTX_new"] = []
     ext_functions["EVP_sha1"] = []

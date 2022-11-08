@@ -645,12 +645,12 @@ class AST2SDFG:
         self.libraries = {}
 
         # library functions are defined as follows
-        # (is_global, global name or postfix for non global, read, write, attach argument index (only for non global) -1 is the return value)
+        # (is_global, global name or postfix for non global, read, write, attach argument index (only for non global) -1 for return value, -2 return value subsituted)
         self.libraries["printf"] = (True, "print", True, True, None)
         self.libraries["fprintf"] = (True, "print", True, True, None)
-        self.libraries["HMAC_CTX_new"] = (False, "_ptr_init", False, True, -1)
-        self.libraries["HMAC_CTX_copy"] = (False, "_ptr_init", True, False, 0)
-        self.libraries["HMAC_Init_ex"] = (False, "_ptr_init", True, False, 0)
+        self.libraries["HMAC_CTX_new"] = (False, "_ptr", False, True, -2)
+        self.libraries["HMAC_CTX_copy"] = (False, "_ptr", True, False, 0)
+        self.libraries["HMAC_Init_ex"] = (False, "_ptr", True, False, 0)
 
         # global names
         self.libstates = ["print"]
@@ -901,7 +901,7 @@ class AST2SDFG:
             ]
 
             for call, libstate in libstate_calls:
-                if libstate[4] == -1:
+                if libstate[4] < 0:
                     # TODO implement me
                     raise_exception("Libstate return type not implemented")
                 else:
@@ -1424,10 +1424,15 @@ class AST2SDFG:
         condition = ConditionWriter(
             sdfg, self.name_mapping).write_tasklet_code(node.cond[0])
 
-        increment = "i+0+1"
+        increment = None
         if isinstance(node.iter[0], BinOp):
             op = node.iter[0].op
             if op == "=" and isinstance(node.iter[0].lvalue, DeclRefExpr):
+                if isinstance(node.iter[0].rvalue, BinOp) and isinstance(node.iter[0].rvalue.rvalue, DeclRefExpr):
+                    mapped_name = self.name_mapping[sdfg].get(node.iter[0].rvalue.rvalue.name)
+                    if mapped_name is not None:
+                        node.iter[0].rvalue.rvalue.name = mapped_name
+
                 if declloop and node.iter[0].lvalue.name == iter_name:
                     increment = TaskletWriter([], []).write_tasklet_code(
                         node.iter[0].rvalue)
@@ -1436,6 +1441,10 @@ class AST2SDFG:
                     increment = ConditionWriter(
                         sdfg, self.name_mapping).write_tasklet_code(
                             node.iter[0].rvalue)
+
+        if increment is None:
+            raise ValueError("Fail to write increment ", name) 
+
         entry = {iter_name: increment}
         #begin_loop_state = sdfg.add_state("BeginLoopState" + str(line))
         #end_loop_state = sdfg.add_state("EndLoopState" + str(line))
@@ -1517,7 +1526,7 @@ class AST2SDFG:
 
                 else:
                     # non global
-                    if libstate[4] == -1:
+                    if libstate[4] < 0:
                         # retval
                         base_name = retval.name
                     else:
@@ -1541,14 +1550,18 @@ class AST2SDFG:
 
                     mapped_name = self.get_name_mapping_in_context(sdfg).get(libstate_var_name)
 
-                    # read
-                    if libstate[2]:
-                        special_list_in[mapped_name + "_task"] = dace.pointer(
-                                            sdfg.arrays.get(self.name_mapping[sdfg]
-                                                            [libstate_var_name]).dtype)
-                    # write
-                    if libstate[3]:
-                        special_list_out.append(mapped_name + "_task_out")
+                    if libstate[4] == -2:
+                        # subsitute return value with libstate
+                        retval.name = libstate_var_name
+                    else:
+                        # read
+                        if libstate[2]:
+                            special_list_in[mapped_name + "_task"] = dace.pointer(
+                                                sdfg.arrays.get(self.name_mapping[sdfg]
+                                                                [libstate_var_name]).dtype)
+                        # write
+                        if libstate[3]:
+                            special_list_out.append(mapped_name + "_task_out")
 
             used_vars = [
                 node for node in walk(node) if isinstance(node, DeclRefExpr)
@@ -1651,7 +1664,7 @@ class AST2SDFG:
                 **input_names_tasklet,
                 **special_list_in
             }, output_names_changed + special_list_out, "text")
-            if libstate is not None:
+            if libstate is not None and libstate[4] != -2:
                 if libstate[2]:
                     add_memlet_read(substate, self.name_mapping[sdfg][libstate_var_name],
                                     tasklet,

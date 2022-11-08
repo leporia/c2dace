@@ -111,12 +111,34 @@ def c2d_workflow(_dir,
 
         return includes
 
+    def list_macros(translation_unit):
+        """ Find all includes within the given TranslationUnit
+        """
+        cursor = translation_unit.cursor
+
+        for child in cursor.get_children():
+            current_file = child.location.file
+
+            if current_file is None:
+                continue
+
+            if str(current_file) != filename:
+                continue
+
+            if child.kind == CursorKind.MACRO_DEFINITION:
+                print("DEFINITION", child.spelling)
+
+            if child.kind == CursorKind.MACRO_INSTANTIATION:
+                print("INSTANTIATION", child.spelling)
+
     parse_flags = clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
 
     source_translation_unit = clang.cindex.TranslationUnit.from_source(filename, parse_args, None, parse_flags, None)
 
     source_includes = list_includes(source_translation_unit)
     print(source_includes)
+
+    #list_macros(source_translation_unit)
 
     headers = ""
     for include in source_includes:
@@ -159,6 +181,8 @@ def c2d_workflow(_dir,
         ReplaceStructDeclStatements,
         UnaryReferenceAndPointerRemover,
         LILSimplifier,
+        CompoundToBinary,
+        BlockWhileToForLoop,
         CondExtractor,
         UnaryExtractor,
         UnaryToBinary,
@@ -206,7 +230,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == UnaryToBinary:
+            if transformation == CondExtractor:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -229,6 +253,7 @@ def c2d_workflow(_dir,
             except Exception as e:
                 print("printing pseudocode failed!")
                 print(e)
+
 
     # for node in tu.cursor.get_children():
     # if node.spelling == "InitStressTermsForElems":

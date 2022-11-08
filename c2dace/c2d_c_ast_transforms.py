@@ -144,6 +144,113 @@ class IndicesExtractor(NodeTransformer):
             newbody.append(self.visit(child))
         return BasicBlock(body=newbody)
 
+
+class BlockWhileToForLoop(NodeTransformer):
+    def __init__(self):
+        self.while_vars = dict()
+        self.to_init = dict()
+        self.global_init = set()
+
+    def visit_BasicBlock(self, node: BasicBlock):
+        for child in node.body:
+            self.visit(child)
+
+        for child in node.body:
+            if isinstance(child, BinOp) and child.op == "=" and isinstance(child.lvalue, DeclRefExpr) and child.lvalue.name in self.global_init:
+                self.global_init.remove(child.lvalue.name)
+
+            self.visit(child)
+        
+        newbody = []
+        for child in node.body:
+            if isinstance(child, BinOp) and child.op == "=" and isinstance(child.lvalue, DeclRefExpr) and child.lvalue.name in self.while_vars:
+                self.while_vars[child.lvalue.name] = child
+                for i in self.to_init[child.lvalue.name]:
+                    if i not in self.global_init:
+                        continue
+
+                    newbody.append(BinOp(op="=",
+                                         lvalue=DeclRefExpr(name=i),
+                                         rvalue=IntLiteral(value="0")))
+
+                continue
+
+            newbody.append(self.visit(child))
+
+        return BasicBlock(body=newbody)
+
+    def visit_WhileStmt(self, node: WhileStmt):
+        if len(node.cond) != 1:
+            return node
+
+        if not isinstance(node.cond[0], DeclRefExpr):
+            return node
+
+        cond_name = node.cond[0].name
+
+        if not isinstance(node.body, list) or len(node.body) != 1:
+            return node
+
+        if not isinstance(node.body[0], BasicBlock):
+            return node
+
+        incrementer = None
+        is_decrementing = True
+        new_body = []
+        for i in node.body[0].body:
+            if not isinstance(i, BinOp) or not isinstance(i.lvalue, DeclRefExpr):
+                new_body.append(i)
+                continue
+
+            if not isinstance(i.rvalue, BinOp):
+                new_body.append(i)
+                continue
+
+            var_name = i.lvalue.name
+            if var_name != cond_name:
+                new_body.append(i)
+                continue
+
+            incrementer = i
+
+            if i.rvalue.op == "-":
+                is_decrementing = True
+            elif i.rvalue.op == "+":
+                is_decrementing = False
+            else:
+                print("WARNING: Unknown operator in while loop")
+
+            if isinstance(i.rvalue.rvalue, DeclRefExpr) and i.rvalue.rvalue.name != cond_name:
+                if cond_name not in self.to_init:
+                    self.to_init[cond_name] = set()
+                self.to_init[cond_name].add(i.rvalue.rvalue.name)
+                self.global_init.add(i.rvalue.rvalue.name)
+
+            print("FOUND incrementer for", var_name)
+
+        if incrementer is None:
+            return node
+
+        if is_decrementing:
+            new_cond = BinOp(op=">", lvalue=DeclRefExpr(name=cond_name), rvalue=IntLiteral(value="0"))
+        else:
+            new_cond = BinOp(op="<", lvalue=DeclRefExpr(name=cond_name), rvalue=IntLiteral(value="0"))
+
+        if cond_name not in self.while_vars:
+            self.while_vars[cond_name] = None
+            init=DeclStmt(vardecl=[VarDecl(name="dummy_var", type=Int(), init=IntLiteral(value="0"))])
+        elif self.while_vars[cond_name] is not None:
+            init = self.while_vars[cond_name]
+        else:
+            init=DeclStmt(vardecl=[VarDecl(name="dummy_var", type=Int(), init=IntLiteral(value="0"))])
+
+        return ForStmt(
+            init=[init],
+            cond=[new_cond],
+            iter=[incrementer],
+            body=[BasicBlock(body=new_body)],
+        )
+
 class CompoundArgumentsExtractor(NodeTransformer):
     def __init__(self):
         self.count = 0
@@ -342,7 +449,7 @@ class ArrayPointerExtractor(NodeTransformer):
         name = node.lvalue.name
 
         if name not in self.array_map:
-            print("Warning undeclared array in ArrayPointerExtractor: " + name)
+            #print("Warning undeclared array in ArrayPointerExtractor: " + name)
             return self.generic_visit(node)
 
         if not isinstance(node.rvalue, BinOp):

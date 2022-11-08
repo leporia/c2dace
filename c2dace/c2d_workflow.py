@@ -183,6 +183,7 @@ def c2d_workflow(_dir,
         LILSimplifier,
         CompoundToBinary,
         BlockWhileToForLoop,
+        ConditionalIncrementUnroller,
         CondExtractor,
         UnaryExtractor,
         UnaryToBinary,
@@ -253,7 +254,6 @@ def c2d_workflow(_dir,
             except Exception as e:
                 print("printing pseudocode failed!")
                 print(e)
-
 
     # for node in tu.cursor.get_children():
     # if node.spelling == "InitStressTermsForElems":

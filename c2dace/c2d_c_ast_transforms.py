@@ -145,6 +145,140 @@ class IndicesExtractor(NodeTransformer):
         return BasicBlock(body=newbody)
 
 
+class ConditionalIncrementUnroller(NodeTransformer):
+    def __init__(self):
+        self.add_data = None
+        self.incr_var = None
+        self.init_var = None
+        self.for_body = None
+        
+    def visit_BasicBlock(self, node: BasicBlock):
+        new_body = []
+        for child in node.body:
+            if isinstance(child, ForStmt):
+                self.add_data = None
+                self.incr_var = None
+                self.init_var = None
+                self.for_body = None
+
+                if_stmt = None
+                new_node = self.visit(child)
+                if self.add_data is not None:
+                    new_body += self.add_data
+
+                if self.for_body is not None:
+                    remainder = BinOp(op="%", lvalue=DeclRefExpr(name=self.init_var), rvalue=DeclRefExpr(name=self.incr_var))
+                    if_stmt = IfStmt(
+                        cond=[BinOp(op="!=", rvalue=IntLiteral(value="0"), lvalue=copy.deepcopy(remainder))],
+                        body_if=[BasicBlock(body=[
+                            BinOp(op="=", lvalue=DeclRefExpr(name=self.incr_var), rvalue=remainder),
+                        ] + self.for_body)],
+                    )
+
+                new_body.append(self.generic_visit(new_node))
+                if if_stmt is not None:
+                    new_body.append(if_stmt)
+
+                continue
+
+            new_body.append(self.visit(child))
+
+        return BasicBlock(body=new_body)
+
+    def visit_ForStmt(self, node: ForStmt):
+        if len(node.init) != 1 or len(node.iter) != 1:
+            return self.generic_visit(node)
+
+        if not isinstance(node.body[0].body[0], IfStmt):
+            return self.generic_visit(node)
+
+        if_stmt = node.body[0].body[0]
+
+        iter_name = None
+        if isinstance(node.init[0], BinOp) and isinstance(node.init[0].lvalue, DeclRefExpr):
+            iter_name = node.init[0].lvalue.name
+            self.init_var = node.init[0].rvalue.name
+        elif isinstance(node.init[0], DeclStmt):
+            iter_name = node.init[0].vardecl[0].name
+            self.init_var = node.init[0].vardecl[0].init.name
+        else:
+            return self.generic_visit(node)
+
+        incr_name = None
+        incr_name_type = None
+        if isinstance(node.iter[0], BinOp) and isinstance(node.iter[0].rvalue, BinOp) and node.iter[0].rvalue.op in ['-', '+'] and isinstance(node.iter[0].rvalue.rvalue, DeclRefExpr):
+            incr_name = node.iter[0].rvalue.rvalue.name
+            incr_name_type = node.iter[0].rvalue.rvalue.type
+        else:
+            return self.generic_visit(node)
+
+        if iter_name not in [x.name for x in walk(if_stmt.cond[0]) if isinstance(x, DeclRefExpr)]:
+            return self.generic_visit(node)
+
+        print("FOR")
+        print(iter_name)
+        print(incr_name)
+
+        branch_single_iteration = None
+        for child in if_stmt.body_if[0].body:
+            if not isinstance(child, BinOp) or child.op != "=":
+                continue
+
+            if not isinstance(child.lvalue, DeclRefExpr) or not isinstance(child.rvalue, DeclRefExpr):
+                continue
+
+            if child.lvalue.name == incr_name and child.rvalue.name == iter_name:
+                branch_single_iteration = True
+
+        for child in if_stmt.body_else[0].body:
+            if not isinstance(child, BinOp) or child.op != "=":
+                continue
+
+            if not isinstance(child.lvalue, DeclRefExpr) or not isinstance(child.rvalue, DeclRefExpr):
+                continue
+
+            if child.lvalue.name == incr_name and child.rvalue.name == iter_name:
+                branch_single_iteration = False
+
+        if branch_single_iteration is None:
+            return self.generic_visit(node)
+
+        if branch_single_iteration == True:
+            self.add_data = copy.deepcopy(if_stmt.body_else[0].body)
+        elif branch_single_iteration == False:
+            self.add_data = copy.deepcopy(if_stmt.body_if[0].body)
+
+        for_cond = node.cond[0]
+        if isinstance(for_cond, BinOp):
+            found = False
+            if isinstance(for_cond.lvalue, DeclRefExpr) and for_cond.lvalue.name == iter_name:
+                # bound is on rval
+                for_cond.rvalue = DeclRefExpr(name=incr_name, type=incr_name_type)
+                found = True
+            elif isinstance(for_cond.lvalue, DeclRefExpr) and for_cond.rvalue.name == iter_name:
+                # bound is on lval
+                for_cond.lvalue = DeclRefExpr(name=incr_name, type=incr_name_type)
+                found = True
+
+            if found:
+                if for_cond.op == "<":
+                    for_cond.op = "<="
+                elif for_cond.op == ">":
+                    for_cond.op = ">="
+
+        node.body[0].body = node.body[0].body[1:]
+
+        self.incr_var = incr_name
+        self.for_body = copy.deepcopy(node.body[0].body)
+
+        return ForStmt(
+            init=node.init,
+            cond=[for_cond],
+            iter=node.iter,
+            body=node.body
+        )
+
+
 class BlockWhileToForLoop(NodeTransformer):
     def __init__(self):
         self.while_vars = dict()

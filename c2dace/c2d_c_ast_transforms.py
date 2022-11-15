@@ -145,6 +145,47 @@ class IndicesExtractor(NodeTransformer):
         return BasicBlock(body=newbody)
 
 
+class InvertForLoop(NodeTransformer):
+    def visit_ForStmt(self, node: ForStmt):
+        if not isinstance(node.init[0], BinOp):
+            return self.generic_visit(node)
+        
+        if not isinstance(node.iter[0], BinOp) or node.iter[0].op != "=" or not isinstance(node.iter[0].rvalue, BinOp):
+            return self.generic_visit(node)
+
+        if node.iter[0].rvalue.op != "-":
+            return self.generic_visit(node)
+
+        if not isinstance(node.iter[0].rvalue.rvalue, DeclRefExpr):
+            return self.generic_visit(node)
+
+        iter_name = node.iter[0].lvalue.name
+        init_val = node.init[0].rvalue
+        incr_name = node.iter[0].rvalue.rvalue.name
+
+        # check if iterator is used inside the body
+        if len([x for x in walk(node.body[0]) if isinstance(x, DeclRefExpr) and x.name == iter_name]) > 0:
+            return self.generic_visit(node)
+
+        print("Notice: inverting loop with iter: " + str(iter_name) + " and incr_name: " + str(incr_name))
+
+        node.iter[0].rvalue.op = "+"
+
+        if node.cond[0].op == "<":
+            node.cond[0].op = ">"
+        elif node.cond[0].op == ">":
+            node.cond[0].op = "<"
+        elif node.cond[0].op == "<=":
+            node.cond[0].op = ">="
+        elif node.cond[0].op == ">=":
+            node.cond[0].op = "<="
+
+        node.cond[0].rvalue = BinOp(op="-", lvalue=init_val, rvalue=node.cond[0].rvalue)
+        node.init[0].rvalue = IntLiteral(value="0")
+
+        return self.generic_visit(node)
+
+
 class ConditionalIncrementUnroller(NodeTransformer):
     def __init__(self):
         self.add_data = None
@@ -214,10 +255,6 @@ class ConditionalIncrementUnroller(NodeTransformer):
 
         if iter_name not in [x.name for x in walk(if_stmt.cond[0]) if isinstance(x, DeclRefExpr)]:
             return self.generic_visit(node)
-
-        print("FOR")
-        print(iter_name)
-        print(incr_name)
 
         branch_single_iteration = None
         for child in if_stmt.body_if[0].body:
@@ -360,7 +397,7 @@ class BlockWhileToForLoop(NodeTransformer):
                 self.to_init[cond_name].add(i.rvalue.rvalue.name)
                 self.global_init.add(i.rvalue.rvalue.name)
 
-            print("FOUND incrementer for", var_name)
+            print("Transforming while loop with incrementer:", var_name)
 
         if incrementer is None:
             return node
@@ -617,7 +654,7 @@ class ArrayPointerExtractor(NodeTransformer):
 
         start_ptr_name = self.array_map.get(rval.name)
         if start_ptr_name is None:
-            print("Warning undeclared array in ArrayPointerExtractor: " + rval.name + ", ", rval)
+            #print("Warning undeclared array in ArrayPointerExtractor: " + rval.name + ", ", rval)
             return self.generic_visit(node)
 
         start_ptr = DeclRefExpr(name=start_ptr_name, type=Int())
@@ -684,7 +721,7 @@ class ArrayPointerExtractor(NodeTransformer):
 
         ptr_name = self.array_map.get(name)
         if ptr_name is None:
-            print("Warning undeclared array in ArrayPointerExtractor: " + node.name)
+            #print("Warning undeclared array in ArrayPointerExtractor: " + node.name)
             return node
 
         ptr_index = DeclRefExpr(name=ptr_name, type=Int())
@@ -771,6 +808,7 @@ class ArrayPointerExtractor(NodeTransformer):
 
             varname = "tmp_array_ptr_" + vardecl.name + "_" + str(self.count)
 
+            print("Splitting pointer " + vardecl.name + " into " + varname)
             self.array_map[vardecl.name] = varname
             self.count += 1
             newbody.append(VarDecl(name=self.array_map[vardecl.name], type=Int(), init=IntLiteral(value="0")))

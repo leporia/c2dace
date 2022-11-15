@@ -134,10 +134,7 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
     ]
 
     for call, libstate in libstate_calls:
-        if libstate[4] == -1:
-            # TODO implement me
-            raise_exception("Libstate return type not implemented")
-        else:
+        if libstate[4] >= 0:
             basename = call.args[libstate[4]].name
 
         libstate_var = state.libstate_mapping.get(top_sdfg).get(basename)
@@ -901,10 +898,7 @@ class AST2SDFG:
             ]
 
             for call, libstate in libstate_calls:
-                if libstate[4] < 0:
-                    # TODO implement me
-                    raise_exception("Libstate return type not implemented")
-                else:
+                if libstate[4] >= 0:
                     basename = call.args[libstate[4]].name
 
                 libstate_var = self.libstate_mapping.get(sdfg).get(basename)

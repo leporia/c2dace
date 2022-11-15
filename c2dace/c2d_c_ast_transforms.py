@@ -145,6 +145,171 @@ class IndicesExtractor(NodeTransformer):
         return BasicBlock(body=newbody)
 
 
+class AliasLoopIterator(NodeTransformer):
+    def visit_BasicBlock(self, node: BasicBlock):
+        new_body = []
+        name_type_mapping = dict()
+        for child in node.body:
+            if isinstance(child, DeclStmt):
+                for vardecl in child.vardecl:
+                    name_type_mapping[vardecl.name] = vardecl.type
+                new_body.append(self.visit(child))
+            elif isinstance(child, VarDecl):
+                name_type_mapping[child.name] = child.type
+                new_body.append(self.visit(child))
+            elif isinstance(child, ForStmt):
+                candidates = self.find_used(child)
+                if len(candidates) == 0:
+                    new_body.append(child)
+                else:
+                    var_mapping = dict()
+                    for i, c in enumerate(candidates):
+                        c_type = name_type_mapping.get(c)
+
+                        if c_type is None:
+                            raise Exception(c, "was not declared")
+
+                        new_name = c+"_old_"+str(i)
+                        var_mapping[c] = new_name
+                        new_body.append(DeclStmt(vardecl=[VarDecl(name=new_name, type=c_type)]))
+                        new_body.append(BinOp(op="=", lvalue=DeclRefExpr(name=new_name), rvalue=DeclRefExpr(name=c)))
+
+                    after_body = []
+                    new_body.append(self.modify_for(child, var_mapping, after_body))
+                    new_body += after_body
+            else:
+                new_body.append(self.visit(child))
+
+        return BasicBlock(body=new_body)
+
+    def find_used(self, node: ForStmt):
+        if not isinstance(node.iter[0], BinOp) or not isinstance(node.iter[0].rvalue, BinOp) or not isinstance(node.iter[0].rvalue.rvalue, DeclRefExpr):
+            return set()
+
+        if not isinstance(node.init[0], DeclStmt):
+            return set()
+
+        for_blk = node.body if isinstance(node.body, BasicBlock) else node.body[0]
+
+        candidate_vars = set()
+        invalid_vars = set()
+        counter = 0
+        incr_point = -1
+        for child in for_blk.body:
+            counter += 1
+            if not isinstance(child, BinOp) or not isinstance(child.lvalue, DeclRefExpr):
+                continue
+
+            is_invalid = True
+            if child.lvalue.name not in invalid_vars:
+                is_invalid = False
+                invalid_vars.add(child.lvalue.name)
+
+            if not isinstance(child.rvalue, BinOp) or not isinstance(child.rvalue.lvalue, DeclRefExpr):
+                continue
+
+            if child.lvalue.name != child.rvalue.lvalue.name:
+                continue
+
+            var_name = child.lvalue.name
+
+            if var_name in candidate_vars:
+                invalid_vars.add(var_name)
+                continue
+
+            if incr_point == -1:
+                incr_point = counter
+            elif incr_point+1 == counter:
+                incr_point = counter 
+
+            if not is_invalid:
+                invalid_vars.remove(var_name)
+            candidate_vars.add(var_name)
+
+        if incr_point != len(for_blk.body):
+            return set()
+
+        return candidate_vars - invalid_vars
+
+    def modify_for(self, node: ForStmt, candidate_vars: Dict[str, str], after_body: List[Node]):
+        for_blk = node.body if isinstance(node.body, BasicBlock) else node.body[0]
+        incr_name = node.iter[0].rvalue.rvalue.name
+        iter_name = node.init[0].vardecl[0].name
+
+        top_body = []
+        new_body = []
+        for child in for_blk.body:
+            if isinstance(child, BinOp) and isinstance(child.lvalue, DeclRefExpr) and child.lvalue.name in candidate_vars:
+                if isinstance(child.rvalue.rvalue, DeclRefExpr):
+                    if child.rvalue.rvalue.name != incr_name:
+                        print("WARNING: aliasing loop iterator with non-incrementing variable")
+                    else:
+                        top_body.append(
+                            BinOp(
+                                op="=",
+                                lvalue=DeclRefExpr(name=child.lvalue.name),
+                                rvalue=BinOp(
+                                    op="+",
+                                    lvalue=DeclRefExpr(name=iter_name),
+                                    rvalue=DeclRefExpr(name=candidate_vars.get(child.lvalue.name))
+                                )
+                            )
+                        )
+                        after_body.append(
+                            BinOp(
+                                op="=",
+                                lvalue=DeclRefExpr(name=child.lvalue.name),
+                                rvalue=BinOp(
+                                    op="+",
+                                    lvalue=DeclRefExpr(name=child.lvalue.name),
+                                    rvalue=DeclRefExpr(name=incr_name)
+                                )
+                            )
+                        )
+
+                elif isinstance(child.rvalue.rvalue, IntLiteral):
+                    top_body.append(
+                        BinOp(
+                            op="=",
+                            lvalue=DeclRefExpr(name=child.lvalue.name),
+                            rvalue=BinOp(
+                                op="+",
+                                lvalue=BinOp(
+                                    op="*",
+                                    lvalue=BinOp(
+                                        op="/",
+                                        lvalue=DeclRefExpr(name=iter_name),
+                                        rvalue=DeclRefExpr(name=incr_name)
+                                    ),
+                                    rvalue=child.rvalue.rvalue
+                                ),
+                                rvalue=DeclRefExpr(name=candidate_vars.get(child.lvalue.name))
+                            )
+                        )
+                    )
+
+                    after_body.append(
+                        BinOp(
+                            op="=",
+                            lvalue=DeclRefExpr(name=child.lvalue.name),
+                            rvalue=BinOp(
+                                op="+",
+                                lvalue=DeclRefExpr(name=child.lvalue.name),
+                                rvalue=copy.deepcopy(child.rvalue.rvalue)
+                            )
+                        )
+                    )
+
+                else:
+                    print("WARNING: Unsupported iterator aliasing", child.rvalue.rvalue)
+                    new_body.append(self.visit(child))
+            else:
+                new_body.append(self.visit(child))
+
+        node.body = [BasicBlock(body=top_body+new_body)]
+        return node
+
+
 class InvertForLoop(NodeTransformer):
     def visit_ForStmt(self, node: ForStmt):
         if not isinstance(node.init[0], BinOp):

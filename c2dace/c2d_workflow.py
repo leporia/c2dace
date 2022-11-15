@@ -200,6 +200,7 @@ def c2d_workflow(_dir,
         IndicesExtractor,
         ForDeclarer,
         ParenExprRemover,
+        AliasLoopIterator,
     ]
 
     debug = True
@@ -232,7 +233,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == ConditionalIncrementUnroller:
+            if transformation == CondExtractor:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -369,6 +370,10 @@ def c2d_workflow(_dir,
     for sd in globalsdfg.all_sdfgs_recursive():
         sd.apply_transformations_repeated(StateAssignElimination,
                                           validate=False)
+
+    print("---------- Doing loop to map ----------")
+    globalsdfg.apply_transformations_repeated(LoopToMap, validate=False)
+    print("----------------- End -----------------")
 
     globalsdfg.save("tmp/" + filecore + "-perf.sdfg")
     from dace.transformation.auto import auto_optimize as aopt

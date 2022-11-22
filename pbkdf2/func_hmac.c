@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
 
     char *pass = "password";
     unsigned char *salt = "salt";
-    int iter=1048576;
+    int iter=5000000;
     long key_length = 80;
     unsigned char result[80];
 

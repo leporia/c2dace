@@ -1338,6 +1338,51 @@ class CallExtractor(NodeTransformer):
         return BasicBlock(body=newbody)
 
 
+class AddNewInitCalls(NodeTransformer):
+    def __init__(self, ext_functions, init_functions):
+        self.ext_functions = ext_functions
+        self.init_functions = init_functions
+        self.call_types = dict()
+
+    def visit_FuncDecl(self, node: FuncDecl):
+        self.call_types = dict()
+        return self.generic_visit(node)
+
+    def visit_BasicBlock(self, node: BasicBlock):
+        new_body = []
+        
+        for child in node.body:
+            if isinstance(child, BinOp) and child.op == "=" and isinstance(child.rvalue, CallExpr):
+                func_name = child.rvalue.name.name
+                self.call_types[func_name] = child.rvalue.type
+                if func_name in self.init_functions.values():
+                    continue 
+            elif isinstance(child, CallExpr) and child.name.name in self.ext_functions:
+                for i, arg in enumerate(self.ext_functions[child.name.name]):
+                    if "new" not in arg or not isinstance(child.args[i], DeclRefExpr):
+                        continue
+
+                    call_type = self.call_types.get(self.init_functions[child.name.name])
+
+                    if call_type is None:
+                        raise Exception(child.name.name, "was never called")
+
+                    arg_name = child.args[i].name
+                    new_body.append(BinOp(
+                        op="=",
+                        lvalue=DeclRefExpr(name=arg_name),
+                        rvalue=CallExpr(
+                            name=DeclRefExpr(name=self.init_functions[child.name.name]),
+                            args=[],
+                            type = call_type,
+                        )
+                    ))
+
+            new_body.append(self.visit(child))
+
+        return BasicBlock(body=new_body)
+
+
 class PowerOptimization(NodeTransformer):
     def visit_CallExpr(self, node: CallExpr):
         if node.name.name != "pow":

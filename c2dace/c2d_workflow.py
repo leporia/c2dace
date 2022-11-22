@@ -173,6 +173,7 @@ def c2d_workflow(_dir,
                 print(e)
 
     transformations = [
+        #AddNewInitCalls,
         PowerOptimization,
         Calloc2Malloc,
         InsertMissingBasicBlocks,
@@ -207,13 +208,17 @@ def c2d_workflow(_dir,
     global_array_map = dict()
 
     ext_functions = {}
-    ext_functions["HMAC_Init_ex"] = ["out", "in", "in", "in", "in"]
-    ext_functions["HMAC_CTX_copy"] = ["out", "in"]
+    ext_functions["HMAC_Init_ex"] = ["out+new", "in", "in", "in", "in"]
+    ext_functions["HMAC_CTX_copy"] = ["out+new", "in"]
     ext_functions["HMAC_Update"] = ["in/out", "in", "in"]
     ext_functions["HMAC_Final"] = ["in", "out", "in"]
     ext_functions["HMAC_CTX_free"] = ["in"]
     ext_functions["HMAC_CTX_new"] = []
     ext_functions["EVP_sha1"] = []
+
+    init_functions = {}
+    init_functions["HMAC_CTX_copy"] = "HMAC_CTX_new"
+    init_functions["HMAC_Init_ex"] = "HMAC_CTX_new"
 
     ignore_values = dict()
     FindIgnoreValues(ext_functions, ignore_values).visit(changed_ast)
@@ -226,14 +231,15 @@ def c2d_workflow(_dir,
     transformation_args = {
         ArrayPointerExtractor: [global_array_map, ext_functions, ignore_values],
         ArrayPointerReset: [global_array_map],
-        CallExtractor: [ext_functions]
+        CallExtractor: [ext_functions],
+        AddNewInitCalls: [ext_functions, init_functions],
     }
 
     for transformation in transformations:
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == CondExtractor:
+            if transformation == PowerOptimization:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -341,7 +347,7 @@ def c2d_workflow(_dir,
     xform_types = [
         TrivialMapElimination,
         HoistState,
-        #InlineTransients,
+        InlineTransients,
         AugAssignToWCR
     ]
 
@@ -365,15 +371,11 @@ def c2d_workflow(_dir,
 
         globalsdfg.apply_transformations_repeated(LoopToMap, validate=False)
 
-        if xforms == 0:
-            break
     for sd in globalsdfg.all_sdfgs_recursive():
         sd.apply_transformations_repeated(StateAssignElimination,
                                           validate=False)
 
-    print("---------- Doing loop to map ----------")
     globalsdfg.apply_transformations_repeated(LoopToMap, validate=False)
-    print("----------------- End -----------------")
 
     globalsdfg.save("tmp/" + filecore + "-perf.sdfg")
     from dace.transformation.auto import auto_optimize as aopt

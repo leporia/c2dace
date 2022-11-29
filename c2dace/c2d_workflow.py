@@ -292,10 +292,16 @@ def c2d_workflow(_dir,
         DeclRefExpr(name="argv_loc"),
         DeclRefExpr(name="c2d_retval")
     ]
+
+    typedefs = {}
+
     translator = AST2SDFG(last_call_expression, globalsdfg, "main",
-                          name_mapping, ext_functions, ignore_values, ptr_aliases)
+                          name_mapping, ext_functions, ignore_values, ptr_aliases, typedefs)
 
     translator.translate(changed_ast, globalsdfg)
+
+    for t in typedefs.keys():
+        headers += "typedef " + t + " " + typedefs[t] + ";\n"
 
     print("SDFG creation done")
 

@@ -639,7 +639,8 @@ class AST2SDFG:
             name_mapping=None,
             ext_functions={},
             ignore_vars={},
-            ptr_aliases={}):
+            ptr_aliases={},
+            typedefs={}):
         self.start_function = start_function
         self.last_sdfg_states = {}
         self.loop_depth = -1
@@ -660,6 +661,9 @@ class AST2SDFG:
 
         # global names
         self.libstates = ["print"]
+
+        self.typedef_mapping = typedefs
+        self.typedef_counter = 0
 
         self.libstate_mapping = {}
         self.libstate_mapping[globalsdfg] = {}
@@ -749,9 +753,20 @@ class AST2SDFG:
         assert isinstance(type, Type)
         if isinstance(type, Pointer) and isinstance(type.pointee_type, Struct):
             if "struct" in type.pointee_type.name:
-                return dace.opaque(type.pointee_type.name + "*")
+                type_name = type.pointee_type.name
             else:
-                return dace.opaque("struct " + type.pointee_type.name + "*")
+                type_name = "struct " + type.pointee_type.name
+
+            type_name += "*"
+
+            type_def = self.typedef_mapping.get(type_name)
+
+            if type_def is None:
+                type_def = type_name[7:-1]+ "_dacetype_" + str(self.typedef_counter)
+                self.typedef_counter += 1
+                self.typedef_mapping[type_name] = type_def
+
+            return dace.opaque(type_def)
 
         if isinstance(type, Array):
             return self.get_dace_type(type.element_type)

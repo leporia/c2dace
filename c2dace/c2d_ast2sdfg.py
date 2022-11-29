@@ -152,6 +152,8 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
                     state.libstate_mapping[new_sdfg] = {}
                 state.libstate_mapping[new_sdfg][basename] = libstate_var
 
+    libstate_vars = state.libstate_vars.get(top_sdfg, set()).union(set(state.libstate_mapping.get(top_sdfg, {}).values()))
+
     for i in top_sdfg.arrays:
         found = False
         for j in used_variables:
@@ -179,7 +181,14 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
                 state.all_array_names, j.name)
             state.all_array_names.append(state.name_mapping[new_sdfg][j.name])
             m = top_sdfg.arrays.get(i)
-            if m.total_size == 1:
+            if j.name in libstate_vars:
+                new_sdfg.add_array(state.name_mapping[new_sdfg][j.name],
+                                   shape=(1, ),
+                                   dtype=m.dtype,
+                                   transient=False,
+                                   strides=m.strides,
+                                   offset=m.offset)
+            elif m.total_size == 1:
                 new_sdfg.add_scalar(state.name_mapping[new_sdfg][j.name],
                                     m.dtype, m.storage, False)
             else:
@@ -655,6 +664,8 @@ class AST2SDFG:
         self.libstate_mapping = {}
         self.libstate_mapping[globalsdfg] = {}
 
+        self.libstate_vars = {}
+
         self.ext_functions = ext_functions
         self.ignore_vars = ignore_vars
         self.ptr_aliases = ptr_aliases
@@ -888,6 +899,9 @@ class AST2SDFG:
         if self.last_call_expression.get(sdfg) is not None:
             variables_in_call = self.last_call_expression[sdfg]
 
+        if self.libstate_mapping.get(new_sdfg) is None:
+            self.libstate_mapping[new_sdfg] = {}
+
         if self.libstate_mapping.get(sdfg) is not None:
             libstate_calls = [
                 (node, self.libraries[node.name.name])
@@ -900,6 +914,8 @@ class AST2SDFG:
             for call, libstate in libstate_calls:
                 if libstate[4] >= 0:
                     basename = call.args[libstate[4]].name
+                else:
+                    continue
 
                 libstate_var = self.libstate_mapping.get(sdfg).get(basename)
 
@@ -914,6 +930,40 @@ class AST2SDFG:
                         if self.libstate_mapping.get(new_sdfg) is None:
                             self.libstate_mapping[new_sdfg] = {}
                         self.libstate_mapping[new_sdfg][basename] = libstate_var
+
+        libstate_calls = [
+            (node, self.libraries[node.name.name])
+            for node in walk(node.body)
+            if isinstance(node, CallExpr) and
+                node.name.name in self.libraries and
+                self.libraries[node.name.name][0] == False
+        ]
+
+        libstate_vars = set()
+
+        for call, libstate in libstate_calls:
+            base_names = []
+            if libstate[4] < 0:
+                # retval
+                binop_vars = [
+                    node.lvalue.name
+                    for node in walk(node.body)
+                    if isinstance(node, BinOp)
+                        and node.op == "="
+                        and node.rvalue == call
+                        and isinstance(node.lvalue, DeclRefExpr)
+                ]
+                base_names += binop_vars
+            else:
+                # argument
+                base_names.append(call.args[libstate[4]].name)
+
+            for base_name in base_names:
+                libstate_var_name = self.libstate_mapping.get(new_sdfg).get(base_name)
+                if libstate_var_name is None:
+                    libstate_vars.add(base_name)
+
+        self.libstate_vars[new_sdfg] = libstate_vars
 
         inouts_in_new_sdfg = []
         ins_in_new_sdfg = []
@@ -992,7 +1042,13 @@ class AST2SDFG:
                     shape = array.shape[indices:]
 
                     if local_name.name in read_names or local_name.name in write_names:
-                        if shape == () or shape == (1, ):
+                        if local_name.name in self.libstate_vars.get(new_sdfg): 
+                            new_sdfg.add_array(
+                                self.name_mapping[new_sdfg][local_name.name],
+                                shape=(1, ),
+                                dtype=array.dtype,
+                                transient=False)
+                        elif shape == () or shape == (1, ):
                             new_sdfg.add_scalar(
                                 self.name_mapping[new_sdfg][local_name.name],
                                 array.dtype, array.storage, False)
@@ -1030,7 +1086,13 @@ class AST2SDFG:
 
                         shape = array.shape[indices:]
                         if local_name.name in read_names or local_name.name in write_names:
-                            if shape == () or shape == (1, ):
+                            if local_name.name in self.libstate_vars.get(new_sdfg): 
+                                new_sdfg.add_array(
+                                    self.name_mapping[new_sdfg][local_name.name],
+                                    shape=(1, ),
+                                    dtype=array.dtype,
+                                    transient=False)
+                            elif shape == () or shape == (1, ):
                                 new_sdfg.add_scalar(
                                     self.name_mapping[new_sdfg][
                                         local_name.name], array.dtype,
@@ -1449,6 +1511,8 @@ class AST2SDFG:
         #sdfg.add_edge(self.last_sdfg_states[sdfg], end_loop_state,
         #             dace.InterstateEdge())
 
+        self.libstate_vars[new_sdfg] = self.libstate_vars[sdfg]
+        self.libstate_mapping[new_sdfg] = self.libstate_mapping[sdfg]
         loop_state = make_nested_sdfg_with_no_context_change(
             sdfg, new_sdfg, name, used_vars, node, self)
         self.translate(node.body, new_sdfg)
@@ -1537,7 +1601,8 @@ class AST2SDFG:
                         mapped_name = find_new_array_name(self.all_array_names, libstate_var_name)
                         self.name_mapping[sdfg][libstate_var_name] = mapped_name
                         base_array = sdfg.arrays.get(self.name_mapping[sdfg][base_name])
-                        sdfg.add_scalar(mapped_name,
+                        sdfg.add_array(mapped_name,
+                                    shape=(1,),
                                     dtype=base_array.dtype,
                                     transient=True)
                         self.all_array_names.append(mapped_name)
@@ -1570,6 +1635,8 @@ class AST2SDFG:
 
             text_pre = ""
             text_post = "\n"
+
+            ctx_vars = []
             
             for i in used_vars:
                 for j in sdfg.arrays:
@@ -1583,7 +1650,10 @@ class AST2SDFG:
                             scalar = True
 
                         in_out = args_in_out.get(i.name)
+
                         if in_out is not None:
+                            if "ctx" in in_out:
+                                ctx_vars.append(i.name)
                             both = False
                             if "in" in in_out:
                                 input_names.append(j)
@@ -1593,7 +1663,7 @@ class AST2SDFG:
                                 output_names.append(j)
                                 output_names_tasklet.append(i.name)
                                 if both:
-                                    text_pre += i.name + "_out = " + i.name + ";\n"
+                                    text_pre += i.name + "_out_1 = " + i.name + "[0];\n"
 
                         else:
                             if not scalar and not node.name.name in [
@@ -1614,7 +1684,7 @@ class AST2SDFG:
                             libstate_var_name = self.libstate_mapping.get(sdfg).get(base_name)
 
                             if libstate[2]:
-                                text_pre += i.name + "_out" + " = " + self.name_mapping.get(sdfg).get(libstate_var_name) + "_task" + ";\n"
+                                text_pre += i.name + "_out_1" + " = " + self.name_mapping.get(sdfg).get(libstate_var_name) + "_task[0]" + ";\n"
 
                             if libstate[3]:
                                 text_post += self.name_mapping[sdfg][libstate_var_name] + "_task_out" + \
@@ -1628,6 +1698,28 @@ class AST2SDFG:
                 #        var=sdfg.arrays.get(i)
                 #        if len(var.shape) == 0 or (len(var.shape) == 1 and var.shape[0] is 1):
                 output_names_changed.append(o_t + "_out")
+
+            new_args = []
+            for i, arg in enumerate(node.args):
+                if not isinstance(arg, DeclRefExpr):
+                    new_args.append(arg)
+                    continue
+
+                if arg.name not in ctx_vars:
+                    new_args.append(arg)
+                    continue
+
+                new_args.append(
+                    ArraySubscriptExpr(
+                        name=arg.name,
+                        indices=None,
+                        type=arg.type,
+                        unprocessed_name=arg,
+                        index=IntLiteral(value="0")
+                    )
+                )
+            
+            node.args = new_args
 
             node.location_line = self.tasklet_count
             tw = TaskletWriter(output_names_tasklet.copy(),
@@ -2040,7 +2132,13 @@ class AST2SDFG:
 
         self.name_mapping[sdfg][node.name] = find_new_array_name(
             self.all_array_names, node.name)
-        if len(sizes) == 0 or (len(sizes) == 1 and sizes[0] == 1):
+        
+        if self.libstate_vars.get(sdfg) is not None and node.name in self.libstate_vars.get(sdfg):
+            sdfg.add_array(self.name_mapping[sdfg][node.name],
+                           shape=(1, ),
+                           dtype=datatype,
+                           transient=True)
+        elif len(sizes) == 0 or (len(sizes) == 1 and sizes[0] == 1):
             sdfg.add_scalar(self.name_mapping[sdfg][node.name],
                             dtype=datatype,
                             transient=True)
@@ -2093,7 +2191,13 @@ class AST2SDFG:
         # print(node.name,sizes,datatype)
         self.name_mapping[sdfg][node.name] = find_new_array_name(
             self.all_array_names, node.name)
-        if scalar:
+
+        if self.libstate_vars.get(sdfg) is not None and node.name in self.libstate_vars.get(sdfg):
+            sdfg.add_array(self.name_mapping[sdfg][node.name],
+                           shape=(1, ),
+                           dtype=datatype,
+                           transient=True)
+        elif scalar:
             #print("SCALAR ADD:",node.name)
             sdfg.add_scalar(self.name_mapping[sdfg][node.name],
                             dtype=datatype,

@@ -373,7 +373,7 @@ class ConditionalIncrementUnroller(NodeTransformer):
                     new_body += self.add_data
 
                 if self.for_body is not None:
-                    remainder = BinOp(op="%", lvalue=DeclRefExpr(name=self.init_var), rvalue=DeclRefExpr(name=self.incr_var))
+                    remainder = BinOp(op="%", lvalue=copy.deepcopy(self.init_var), rvalue=DeclRefExpr(name=self.incr_var))
                     if_stmt = IfStmt(
                         cond=[BinOp(op="!=", rvalue=IntLiteral(value="0"), lvalue=copy.deepcopy(remainder))],
                         body_if=[BasicBlock(body=[
@@ -403,10 +403,10 @@ class ConditionalIncrementUnroller(NodeTransformer):
         iter_name = None
         if isinstance(node.init[0], BinOp) and isinstance(node.init[0].lvalue, DeclRefExpr):
             iter_name = node.init[0].lvalue.name
-            self.init_var = node.init[0].rvalue.name
+            self.init_var = node.init[0].rvalue
         elif isinstance(node.init[0], DeclStmt):
             iter_name = node.init[0].vardecl[0].name
-            self.init_var = node.init[0].vardecl[0].init.name
+            self.init_var = node.init[0].vardecl[0].init
         else:
             return self.generic_visit(node)
 

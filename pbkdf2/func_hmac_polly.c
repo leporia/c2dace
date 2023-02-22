@@ -1,5 +1,6 @@
 #include <openssl/hmac.h>
 #include <string.h>
+#include <omp.h>
 
 /*
 #define KDF_PBKDF2_MIN_KEY_LEN_BITS 112
@@ -102,6 +103,7 @@ int main(int argc, char** argv) {
     unsigned char result[80];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
+    omp_set_num_threads(4);
     int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, key_length, 0);
 
     if (!success) {

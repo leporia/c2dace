@@ -204,7 +204,7 @@ def c2d_workflow(_dir,
         AliasLoopIterator,
     ]
 
-    debug = True
+    debug = verbose
     global_array_map = dict()
 
     ext_functions = {}
@@ -329,11 +329,11 @@ def c2d_workflow(_dir,
 
     globalsdfg.save("tmp/" + filecore + "-promoted-notfused.sdfg")
 
-    if debug:
-        for codeobj in globalsdfg.generate_code():
-            if codeobj.title == 'Frame':
-                with open("tmp/middle_code.cc", 'w') as fp:
-                    fp.write(codeobj.clean_code)
+    #if debug:
+    #    for codeobj in globalsdfg.generate_code():
+    #        if codeobj.title == 'Frame':
+    #            with open("tmp/middle_code.cc", 'w') as fp:
+    #                fp.write(codeobj.clean_code)
 
         #globalsdfg.compile()
         #return
@@ -381,6 +381,7 @@ def c2d_workflow(_dir,
         sd.apply_transformations_repeated(StateAssignElimination,
                                           validate=False)
 
+    globalsdfg.simplify(verbose=debug)
     globalsdfg.apply_transformations_repeated(LoopToMap, validate=False)
 
     globalsdfg.save("tmp/" + filecore + "-perf.sdfg")
@@ -395,15 +396,121 @@ def c2d_workflow(_dir,
             with open("tmp/" + filecore + '-dace.cc', 'w') as fp:
                 fp.write(codeobj.clean_code)
 
-    #globalsdfg.instrument = dace.InstrumentationType.Timer
-    #counter = 0
-    #for state in globalsdfg.nodes():
-    #    print(counter, state)
-    #    counter += 1
-    #    state.instrument = dace.InstrumentationType.Timer
+    from dace import registry
+    from dace import dtypes
+    from dace.codegen.targets.framecode import DaCeCodeGenerator
+    from dace.codegen.dispatcher import DefinedType
+    from dace.codegen.targets.cpu import CPUCodeGen
+    from dace.codegen.targets import cpp
+    from dace.codegen import cppunparse
+    from dace.sdfg import nodes
+    from dace.properties import CodeBlock
 
-    #globalsdfg()
-    #report = globalsdfg.get_latest_report()
-    #print(report)
+    dace.StorageType.register("ThreadLocal_with_init")
+
+    @registry.autoregister_params(name="thread_init")
+    class ThreadInit_Alloc(CPUCodeGen):
+        def __init__(self, frame_codegen: DaCeCodeGenerator, sdfg: dace.SDFG):
+            self._frame = frame_codegen
+            self._dispatcher = frame_codegen.dispatcher
+            self._dispatcher.register_array_dispatcher(dace.StorageType.ThreadLocal_with_init, self)
+            self._locals = cppunparse.CPPLocals()
+            self._ldepth = 0
+            self._toplevel_schedule = None
+
+            cpu_storage = [dtypes.StorageType.CPU_Heap, dtypes.StorageType.CPU_ThreadLocal, dtypes.StorageType.Register]
+            for storage in cpu_storage:
+                self._dispatcher.register_copy_dispatcher(storage, dace.StorageType.ThreadLocal_with_init, None, self)
+                self._dispatcher.register_copy_dispatcher(dace.StorageType.ThreadLocal_with_init, storage, None, self)
+
+        def allocate_array(self, sdfg, dfg, state_id, node, nodedesc, function_stream, declaration_stream, allocation_stream):
+            tasklet = None
+            edge = None
+            for n in dfg.nodes():
+                if tasklet is not None:
+                    break
+
+                for e in dfg.out_edges(n):
+                    if e.dst == node:
+                        tasklet = e.src
+                        edge = e
+                        break
+
+            if tasklet is None:
+                raise ValueError("Could not find tasklet")
+
+            code = tasklet.code.code
+            tasklet_name = edge.src_conn
+
+            alloc_name = cpp.ptr(node.data, nodedesc, sdfg, self._frame)
+            name = alloc_name
+
+            declared = self._dispatcher.declared_arrays.has(alloc_name)
+
+            arrsize = nodedesc.total_size
+
+            if not declared:
+                function_stream.write(
+                    "{ctype} *{name};\n#pragma omp threadprivate({name})".format(ctype=nodedesc.dtype.ctype, name=name),
+                    sdfg,
+                    state_id,
+                    node,
+                )
+                self._dispatcher.declared_arrays.add_global(name, DefinedType.Pointer, '%s *' % nodedesc.dtype.ctype)
+
+            # Allocate in each OpenMP thread
+            # {name} = new {ctype} DACE_ALIGN(64)[{arrsize}];""".format(ctype=nodedesc.dtype.ctype,
+            allocation_stream.write(
+                """
+                #pragma omp parallel
+                {{
+                    {name} = new {ctype} [{arrsize}];""".format(ctype=nodedesc.dtype.ctype,
+                                                                                name=alloc_name,
+                                                                                arrsize=cpp.sym2cpp(arrsize)),
+                sdfg,
+                state_id,
+                node,
+            )
+
+            super(ThreadInit_Alloc, self)._generate_Tasklet(sdfg, dfg, state_id, tasklet, function_stream, allocation_stream)
+
+            # Close OpenMP parallel section
+            allocation_stream.write('}')
+            self._dispatcher.defined_vars.add_global(name, DefinedType.Pointer, '%s *' % nodedesc.dtype.ctype)
+
+        def declare_array(self, sdfg, dfg, state_id, node, nodedesc, function_stream, declaration_stream):
+            nodedesc.storage = dtypes.StorageType.CPU_ThreadLocal
+            super(ThreadInit_Alloc, self).deallocate_array(sdfg, dfg, state_id, node, nodedesc, function_stream, declaration_stream)
+
+        def deallocate_array(self, sdfg, dfg, state_id, node, nodedesc, function_stream, callsite_stream):
+            nodedesc.storage = dtypes.StorageType.CPU_ThreadLocal
+            super(ThreadInit_Alloc, self).deallocate_array(sdfg, dfg, state_id, node, nodedesc, function_stream, callsite_stream)
+
+
+    for state in globalsdfg.nodes():
+        for node in state.nodes():
+            if isinstance(node, dace.nodes.Tasklet) and "HMAC_CTX_new" in node.code.code:
+                for edge in state.out_edges(node):
+                    if not isinstance(edge.dst, nodes.AccessNode):
+                        continue
+
+                    if edge.dst.label == "dace_hctx_ptr_0":
+                        edge.dst.desc(globalsdfg).storage = dace.StorageType.ThreadLocal_with_init
+    
+    globalsdfg.save("tmp/" + filecore + "-opt2.sdfg")
+
+    '''
+    globalsdfg.instrument = dace.InstrumentationType.Timer
+    counter = 0
+    for sdfg in globalsdfg.all_sdfgs_recursive():
+        for state in sdfg.nodes():
+            print(counter, state)
+            counter += 1
+            state.instrument = dace.InstrumentationType.Timer
+
+    globalsdfg()
+    report = globalsdfg.get_latest_report()
+    print(report)
+    '''
 
     globalsdfg.compile()

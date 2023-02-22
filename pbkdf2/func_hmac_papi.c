@@ -1,5 +1,6 @@
 #include <openssl/hmac.h>
 #include <string.h>
+//#include <papi.h>
 
 /*
 #define KDF_PBKDF2_MIN_KEY_LEN_BITS 112
@@ -52,6 +53,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     HMAC_Init_ex(hctx_tpl, pass, passlen, EVP_sha1(), 0);
     hctx = HMAC_CTX_new();
 
+    //PAPI_hl_region_begin("computation");
     while (tkeylen) {
         if (tkeylen > mdlen)
             cplen = mdlen;
@@ -86,6 +88,7 @@ int pbkdf2_derive(const char *pass, size_t passlen,
         i++;
         p += cplen;
     }
+    //PAPI_hl_region_end("computation");
     ret = 1;
 
     HMAC_CTX_free(hctx);
@@ -98,8 +101,8 @@ int main(int argc, char** argv) {
     char *pass = "password";
     unsigned char *salt = "salt";
     int iter=10000000;
-    long key_length = 80;
-    unsigned char result[80];
+    long key_length = 20;
+    unsigned char result[20];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
     int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, key_length, 0);

@@ -826,6 +826,7 @@ class AST2SDFG:
         break_state = add_simple_state_to_sdfg(self, sdfg,
                                                "BreakState" + str(line))
         self.last_loop_break_state[sdfg] = break_state
+        print("break:", sdfg)
         sdfg.add_edge(break_state, self.last_loop_break[sdfg],
                       dace.InterstateEdge())
 

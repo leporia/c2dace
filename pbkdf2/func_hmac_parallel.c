@@ -1,5 +1,7 @@
 #include <openssl/hmac.h>
 #include <string.h>
+#include <omp.h>
+//#include <papi.h>
 
 /*
 #define KDF_PBKDF2_MIN_KEY_LEN_BITS 112
@@ -7,6 +9,9 @@
 #define KDF_PBKDF2_MIN_ITERATIONS 1000
 #define KDF_PBKDF2_MIN_SALT_LEN 128 / 8
 */
+
+HMAC_CTX *hctx;
+#pragma omp threadprivate(hctx)
 
 int pbkdf2_derive(const char *pass, size_t passlen,
                          const unsigned char *salt, int saltlen, uint64_t iter, unsigned char *key,
@@ -18,11 +23,10 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     uint64_t KDF_PBKDF2_MIN_SALT_LEN = 128 / 8;
 
     int ret = 0;
-    unsigned char digtmp[EVP_MAX_MD_SIZE], *p, itmp[4];
-    int cplen, k, tkeylen, mdlen;
-    uint64_t j;
+    unsigned char *p;
+    int tkeylen, mdlen;
     unsigned long i = 1;
-    HMAC_CTX *hctx_tpl = 0, *hctx = 0;
+    HMAC_CTX *hctx_tpl = 0;
 
     mdlen = 20;
 
@@ -50,42 +54,63 @@ int pbkdf2_derive(const char *pass, size_t passlen,
     p = key;
     tkeylen = keylen;
     HMAC_Init_ex(hctx_tpl, pass, passlen, EVP_sha1(), 0);
-    hctx = HMAC_CTX_new();
 
+    #pragma omp parallel
+    {
+        hctx = HMAC_CTX_new();
+    }
+
+    //PAPI_hl_region_begin("computation");
+    #pragma omp parallel
     while (tkeylen) {
-        if (tkeylen > mdlen)
-            cplen = mdlen;
-        else
-            cplen = tkeylen;
-        
-        /*
-         * We are unlikely to ever use more than 256 blocks (5120 bits!) but
-         * just in case...
-         */
-        itmp[0] = (unsigned char)((i >> 24) & 0xff);
-        itmp[1] = (unsigned char)((i >> 16) & 0xff);
-        itmp[2] = (unsigned char)((i >> 8) & 0xff);
-        itmp[3] = (unsigned char)(i & 0xff);
+        unsigned char digtmp[EVP_MAX_MD_SIZE], itmp[4];
+        unsigned char *local_p;
+        int local_i, local_tkeylen;
+        int cplen;
+
+        #pragma omp critical
+        {
+            local_p = p;
+            local_i = i;
+            local_tkeylen = tkeylen;
+
+            if (tkeylen > mdlen) {
+                cplen = mdlen;
+            } else {
+                cplen = tkeylen;
+            }
+
+            tkeylen -= cplen;
+            i++;
+            p += cplen;
+        }
+
+        if (local_tkeylen <= 0) {
+            break;
+        }
+
+        itmp[0] = (unsigned char)((local_i >> 24) & 0xff);
+        itmp[1] = (unsigned char)((local_i >> 16) & 0xff);
+        itmp[2] = (unsigned char)((local_i >> 8) & 0xff);
+        itmp[3] = (unsigned char)(local_i & 0xff);
 
         HMAC_CTX_copy(hctx, hctx_tpl);
         HMAC_Update(hctx, salt, saltlen);
         HMAC_Update(hctx, itmp, 4);
         HMAC_Final(hctx, digtmp, 0);
 
-        memcpy(p, digtmp, cplen);
+        memcpy(local_p, digtmp, cplen);
 
-        for (j = 1; j < iter; j++) {
+        for (int j = 1; j < iter; j++) {
             HMAC_CTX_copy(hctx, hctx_tpl);
             HMAC_Update(hctx, digtmp, mdlen);
             HMAC_Final(hctx, digtmp, 0);
 
-            for (k = 0; k < cplen; k++)
-                p[k] ^= digtmp[k];
+            for (int k = 0; k < cplen; k++)
+                local_p[k] ^= digtmp[k];
         }
-        tkeylen -= cplen;
-        i++;
-        p += cplen;
     }
+   // PAPI_hl_region_end("computation");
     ret = 1;
 
     HMAC_CTX_free(hctx);
@@ -102,6 +127,7 @@ int main(int argc, char** argv) {
     unsigned char result[80];
 
     //int success = pbkdf2_derive(pass, sizeof(pass)-1, salt, sizeof(salt)-1, iter, result, sizeof(result)-1, 0);
+    //omp_set_num_threads(4);
     int success = pbkdf2_derive(pass, 8, salt, 4, iter, result, key_length, 0);
 
     if (!success) {

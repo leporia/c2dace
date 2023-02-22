@@ -67,7 +67,7 @@ class ThreadInit_Alloc(CPUCodeGen):
             """
             #pragma omp parallel
             {{
-                {name} = new {ctype} DACE_ALIGN(64)[{arrsize}];""".format(ctype=nodedesc.dtype.ctype,
+                {name} = new {ctype} [{arrsize}];""".format(ctype=nodedesc.dtype.ctype,
                                                                             name=alloc_name,
                                                                             arrsize=cpp.sym2cpp(arrsize)),
             sdfg,
@@ -90,9 +90,37 @@ class ThreadInit_Alloc(CPUCodeGen):
         super(ThreadInit_Alloc, self).deallocate_array(sdfg, dfg, state_id, node, nodedesc, function_stream, callsite_stream)
 
 
-sdfg = SDFG("func_hmac").from_file("tmp/func_hmac-opt.sdfg")
+#sdfg = SDFG("func_hmac").from_file("tmp/func_hmac-opt2.sdfg")
+sdfg = SDFG("func_hmac").from_file("tmp/arr-opt.sdfg")
+
+'''
+for state in sdfg.nodes():
+    for node in state.nodes():
+        if isinstance(node, nodes.Tasklet) and "HMAC_CTX_new" in node.code.code:
+            for edge in state.out_edges(node):
+                if not isinstance(edge.dst, nodes.AccessNode):
+                    continue
+
+                if edge.dst.label == "dace_hctx_ptr_0":
+                    edge.dst.desc(sdfg).storage = dace.StorageType.ThreadLocal_with_init
+
+sdfg.save("tmp/ext_threadlocal.sdfg")
+'''
+
+maps_exit = []
+for node, _ in sdfg.all_nodes_recursive():
+    if isinstance(node, dace.nodes.MapExit):
+        maps_exit.append(node)
+
+print(maps_exit)
+from dace.transformation.dataflow import AccumulateTransient
+#AccumulateTransient.apply_to(sdfg, dict(array='dace_p_0', identity=0), map_exit=maps_exit[0], outer_map_exit=maps_exit[1])
+
+sdfg.save("tmp/ext_acc.sdfg")
 
 for codeobj in sdfg.generate_code():
     if codeobj.title == 'Frame':
         with open("tmp/ext_comp.cpp", 'w') as fp:
             fp.write(codeobj.clean_code)
+
+sdfg.compile()

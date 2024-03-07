@@ -239,7 +239,7 @@ def c2d_workflow(_dir,
         if debug:
             print("="*10)
             print(transformation)
-            if transformation == PowerOptimization:
+            if transformation == MallocForceInitializer:
                 with open("tmp/middle.pseudo.cpp", "w") as f:
                     f.write(get_pseudocode(changed_ast))
                 with open("tmp/middle.txt", "w") as f:
@@ -303,6 +303,9 @@ def c2d_workflow(_dir,
     for t in typedefs.keys():
         headers += "typedef " + t + " " + typedefs[t] + ";\n"
 
+    print(translator.typedefs)
+    print(translator.typedef_mapping)
+
     print("SDFG creation done")
 
     from dace import propagate_memlets_sdfg
@@ -324,8 +327,10 @@ def c2d_workflow(_dir,
     globalsdfg.save("tmp/" + filecore + "-untransformed.sdfg")
     globalsdfg.validate()
 
+    prom = scal2sym.ScalarToSymbolPromotion()
+    prom.ignore = set(['c2d_retval'])
     for sd in globalsdfg.all_sdfgs_recursive():
-        promoted = scal2sym.promote_scalars_to_symbols(sd)
+        promoted = prom.apply_pass(sd, {})
 
     globalsdfg.save("tmp/" + filecore + "-promoted-notfused.sdfg")
 
@@ -346,8 +351,7 @@ def c2d_workflow(_dir,
     propagate_memlets_sdfg(globalsdfg)
 
     for sd in globalsdfg.all_sdfgs_recursive():
-        promoted = scal2sym.promote_scalars_to_symbols(sd, ignore=set(['c2d_retval']))
-        #promoted = scal2sym.promote_scalars_to_symbols(sd)
+        promoted = prom.apply_pass(sd, {})
         print(sd.label, 'promoting', promoted)
     globalsdfg.save("tmp/" + filecore + "-nomap.sdfg")
     xform_types = [
@@ -513,4 +517,38 @@ def c2d_workflow(_dir,
     print(report)
     '''
 
-    globalsdfg.compile()
+    try:
+        globalsdfg.compile()
+    except dace.codegen.exceptions.CompilationError as e:
+        print("Compilation error")
+        # patch files a bit in a crude way. Fixing the DaCe backend is better
+        main_name = ".dacecache/_" + filecore + "/sample/_" + filecore + "_main.cpp"
+        cpu_name = ".dacecache/_" + filecore + "/src/cpu/_" + filecore + ".cpp"
+
+        # fix _argcount unbound
+        content = ""
+        with open(main_name, "r") as f:
+            content = f.read()
+        content = content.replace("int argc_loc = 42;\n", "int argc_loc = 42;\n\tint _argcount = argc_loc;\n")
+        with open(main_name, "w") as f:
+            f.write(content)
+
+        # fix repeting lines
+        content = ""
+        with open(cpu_name, "r") as f:
+            content = f.read()
+        content = content.split("\n")
+        new_content = []
+        prev_l = ""
+        for l in content:
+            if l == "":
+                prev_l = ""
+                continue
+
+            if l != prev_l:
+                new_content.append(l)
+            prev_l = l
+        
+        content = "\n".join(new_content)
+        with open(cpu_name, "w") as f:
+            f.write(content)

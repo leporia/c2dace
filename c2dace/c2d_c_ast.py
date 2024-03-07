@@ -143,6 +143,8 @@ class Bool(Type):
 class Void(Type):
     _attributes = ()
 
+class Opaque(Type):
+    _attributes = ("type", )
 
 class Struct(Type):
     _attributes = ("name", )

@@ -1253,6 +1253,10 @@ class InitExtractor(NodeTransformer):
                     # only structs left are the external ones, no need to to init extraction
                     continue
 
+                if isinstance(i.type, Pointer) and isinstance(i.type.pointee_type, Opaque):
+                    # external types
+                    continue
+
                 newbody.append(
                     BinOp(op="=",
                             lvalue=DeclRefExpr(name=i.name),

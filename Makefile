@@ -1,11 +1,11 @@
-DACE_INCLUDE = ~/.local/lib/python3.10/site-packages/dace/runtime/include
+DACE_INCLUDE = ~/.local/lib/python3.12/site-packages/dace/runtime/include
 
 FILENAME := func_hmac
 FILE := pbkdf2/$(FILENAME).c
 FILENAME2 := _$(FILENAME)
 
 run:
-	python3 c2dace/c2d.py -f $(FILE)
+	python3.8 c2dace/c2d.py -f $(FILE)
 
 clean:
 	rm -Rf tmp/* .dacecache _dacegraphs a.out orig

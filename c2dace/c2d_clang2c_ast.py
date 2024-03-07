@@ -622,8 +622,17 @@ def type_void(lang_type: clang.cindex.Type):
 
 def type_struct(clang_type: clang.cindex.Type):
     type_name = clang_type.spelling
+
+    # fix me this is not always a struct
+    if type_name == "uint64_t" or type_name == "size_t":
+        return ULongLong()
+
+    print("Struct: ", type_name)
+
     if type_name[:len("struct ")] == "struct ":
         type_name = type_name[len("struct "):]
+    else:
+        return Opaque(type=type_name)
 
     if clang_type.get_declaration().kind == CursorKind.CLASS_DECL:
         return Class(name=type_name)

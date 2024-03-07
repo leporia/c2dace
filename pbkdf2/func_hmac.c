@@ -10,16 +10,16 @@
 
 int pbkdf2_derive(const char *pass, size_t passlen,
                          const unsigned char *salt, int saltlen, uint64_t iter, unsigned char *key,
-                         size_t keylen, int lower_bound_checks)
+                         uint64_t keylen, int lower_bound_checks)
 {
     uint64_t KDF_PBKDF2_MIN_KEY_LEN_BITS = 112;
     uint64_t KDF_PBKDF2_MAX_KEY_LEN_DIGEST_RATIO = 0xFFFFFFFF;
     uint64_t KDF_PBKDF2_MIN_ITERATIONS = 1000;
     uint64_t KDF_PBKDF2_MIN_SALT_LEN = 128 / 8;
 
-    int ret = 0;
     unsigned char digtmp[EVP_MAX_MD_SIZE], *p, itmp[4];
-    int cplen, k, tkeylen, mdlen;
+    int cplen, k, tkeylen;
+    uint64_t mdlen;
     uint64_t j;
     unsigned long i = 1;
     HMAC_CTX *hctx_tpl = 0, *hctx = 0;
@@ -86,11 +86,10 @@ int pbkdf2_derive(const char *pass, size_t passlen,
         i++;
         p += cplen;
     }
-    ret = 1;
 
     HMAC_CTX_free(hctx);
     HMAC_CTX_free(hctx_tpl);
-    return ret;
+    return 1;
 }
 
 int main(int argc, char** argv) {

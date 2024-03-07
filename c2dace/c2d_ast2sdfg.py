@@ -167,6 +167,11 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
         if not found:
             for j in state.globalsdfg.arrays:
                 if state.name_mapping.get(top_sdfg).get(j) == i:
+                    #print("FOUND GLOBAL:", j, i, state.name_mapping.get(top_sdfg).get(j))
+                    # skip unused global variables
+                    if j not in state.libstates and j not in write_names and j not in read_names:
+                        break;
+
                     found = True
                     global_value = True
                     break
@@ -751,6 +756,10 @@ class AST2SDFG:
 
     def get_dace_type(self, type: Type):
         assert isinstance(type, Type)
+        if isinstance(type, Pointer) and isinstance(type.pointee_type, Opaque):
+            print("we got pointer opaque")
+            return dace.opaque(type.pointee_type.type + "*")
+
         if isinstance(type, Pointer) and isinstance(type.pointee_type, Struct):
             if "struct" in type.pointee_type.name:
                 type_name = type.pointee_type.name
@@ -2117,7 +2126,7 @@ class AST2SDFG:
                 datatype = self.get_dace_type(node.type)
         elif node.type is not None:
             #print("vardecl type",node.type)
-            if isinstance(node.type, Pointer):
+            if isinstance(node.type, Pointer) and not isinstance(node.type.pointee_type, Opaque):
                 if (not isinstance(node.type.pointee_type, Struct)):
                     self.incomplete_arrays[(sdfg, node.name)] = node
                     return

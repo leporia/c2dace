@@ -77,6 +77,11 @@ def get_var_name(node):
         # ignore because is not a variable that we want to handle
         return
 
+    if isinstance(node, BinOp):
+        # only lvalue because it is used for twin transform
+        # pointer is always lvalue
+        return get_var_name(node.lvalue)
+
     print("WARNING cannot find name of ", node)
 
 
@@ -342,6 +347,8 @@ def remove_duplicates(vars: List[DeclRefExpr]):
             i += 1
         elif isinstance(vars[i], CallExpr):
             i += 1
+        elif isinstance(vars[i], CCastExpr):
+            vars[i] = vars[i].expr
         else:
             print("WARNING (remove_duplicates) - UNKNOWN EXPRESSION TYPE:", vars[i])
             i += 1
@@ -531,7 +538,6 @@ class TaskletWriter:
             #print("RET TW:",text)
             return text
         else:
-
             print("ERROR:", node.__class__.__name__)
 
 
@@ -722,6 +728,7 @@ class AST2SDFG:
         self.ctypes2dacetypes = {
             Double: dace.float64,
             Float: dace.float32,
+            UInt: dace.uint32,
             Int: dace.int32,
             Char: dace.int8,
             Long: dace.int32,

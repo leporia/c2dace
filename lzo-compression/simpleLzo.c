@@ -5,82 +5,7 @@
 
 unsigned int read_buffer_size;
 
-static unsigned int
-do_compress ( unsigned char* in , unsigned int  in_len,
-                    unsigned char* out, unsigned int* out_len,
-                    unsigned int  ti,  void* wrkmem);
-
-
-
-
-int lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
-                         unsigned char* out, unsigned int* out_len,
-                         void* wrkmem )
-{
-	unsigned char* ip = in;
-	unsigned char* op = out;
-    unsigned int l = in_len;
-    unsigned int t = 0;
-
-    while (l > 20) {
-        size_t ll = l;
-        size_t ll_end;
-		/* Note throughput increase if you can fit everything in L1 cache? */
-		if (ll > 49152) {
-			ll = 49152;	
-		}
-        ll_end = (((size_t)ip) + ll);
-        if ((ll_end + ((t + ll) >> 5)) <= ll_end || (unsigned char*)(ll_end + ((t + ll) >> 5)) <= ip + ll)
-            break;
-
-        memset(wrkmem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
-
-        t = do_compress(ip,ll,op,out_len,t,wrkmem);
-        ip += ll;
-        op += *out_len;
-        l  -= ll;
-    }
-    t += l;
-
-    if (t > 0)
-    {
-        unsigned char* ii = in + in_len - t;
-
-        if (op == out && t <= 238)
-            *op++ = (unsigned char)(17 + t);
-        else if (t <= 3)
-            op[-2] |= (unsigned char)(t);
-        else if (t <= 18)
-            *op++ = (unsigned char)(t - 3);
-        else
-        {
-            *op++ = 0;
-			unsigned int tt;
-            for (tt = t-18; tt > 255; tt-=255) {
-                *(unsigned char *) op++ = 0;
-            }
-            *op++ = (unsigned char)(tt);
-        }
-
-		for (;t >0; t--) {
-			*op++ = *ii++;
-		}
-    }
-
-    *op++ = 0x10 | 1;
-    *op++ = 0;
-    *op++ = 0;
-
-    *out_len = op - out; //pd(op, out);
-
-	return 0; //LZO_E_OK;
-}
-
-/***********************************************************************
-// compress a block of data.
-************************************************************************/
-
-static unsigned int
+unsigned int
 do_compress ( unsigned char* in , unsigned int  in_len,
                     unsigned char* out, unsigned int* out_len,
                     unsigned int  ti,  void* wrkmem)
@@ -90,24 +15,25 @@ do_compress ( unsigned char* in , unsigned int  in_len,
     unsigned char* in_end = in + in_len;
     unsigned char* ip_end = in + in_len - 20;
     unsigned char* ii;
-    unsigned short* dict = (unsigned short*) wrkmem;
+    unsigned short* dict = wrkmem;
 
     op = out;
     ip = in;
     ii = ip;
 
-    ip += ti < 4 ? 4 - ti : 0;
+	if (ti < 4) {
+		ip += 4 - ti;
+	}
 	ip += 1 + ((ip - ii) >> 5);
 
-    for (;;) {
+    while (ip < ip_end) {
         const unsigned char* m_pos;
 
         unsigned int m_off;
         unsigned int m_len;
 		unsigned int dv;
 		unsigned int dindex;
-		if (ip >= ip_end)
-			break;
+
 		dv = *((unsigned int*) ip);
 		dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
 		m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
@@ -158,7 +84,7 @@ do_compress ( unsigned char* in , unsigned int  in_len,
 					*op++ = (unsigned char)(tt);
 				}
 
-				for (;t > 0; t--) {
+				for (int i=0;t > 0; t--) {
 					*op++ = *ii++;
 				}
 			}
@@ -236,12 +162,76 @@ do_compress ( unsigned char* in , unsigned int  in_len,
     return in_end - (ii-ti);
 }
 
+
+void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
+                         unsigned char* out, unsigned int* out_len,
+                         void* wrkmem )
+{
+	unsigned char* ip = in;
+	unsigned char* op = out;
+    unsigned int l = in_len;
+    unsigned int t = 0;
+
+    while (l > 20) {
+        size_t ll = l;
+        size_t ll_end;
+		/* Note throughput increase if you can fit everything in L1 cache? */
+		if (ll > 49152) {
+			ll = 49152;	
+		}
+        ll_end = (((size_t)ip) + ll);
+        if ((ll_end + ((t + ll) >> 5)) <= ll_end || (unsigned char*)(ll_end + ((t + ll) >> 5)) <= ip + ll)
+            break;
+
+        memset(wrkmem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
+
+        t = do_compress(ip,ll,op,out_len,t,wrkmem);
+        ip += ll;
+        op += *out_len;
+        l  -= ll;
+    }
+    t += l;
+
+    if (t > 0)
+    {
+        unsigned char* ii = in + in_len - t;
+
+        if (op == out && t <= 238)
+            *op++ = (unsigned char)(17 + t);
+        else if (t <= 3)
+            op[-2] |= (unsigned char)(t);
+        else if (t <= 18)
+            *op++ = (unsigned char)(t - 3);
+        else
+        {
+            *op++ = 0;
+			unsigned int tt;
+            for (tt = t-18; tt > 255; tt-=255) {
+                *(unsigned char *) op++ = 0;
+            }
+            *op++ = (unsigned char)(tt);
+        }
+
+		for (int i=0;t >0; t--) {
+			*op++ = *ii++;
+		}
+    }
+
+    *op++ = 0x10 | 1;
+    *op++ = 0;
+    *op++ = 0;
+
+    *out_len = op - out; //pd(op, out);
+
+	return;
+}
+
 int main(int argc, char** argv)
 {
 	int aa,numIterations;
-	FILE* infile = NULL;
+	int infile;
 	size_t numRead;
-	FILE* outfile = NULL;
+	int outfile;
 	
 	unsigned int compressionBlockSizeBytes;
 	unsigned int bufferedBytes = 0;
@@ -249,10 +239,10 @@ int main(int argc, char** argv)
 	unsigned int outLength;
 	unsigned int blockSize;
 	static char inputfname[300];
-	unsigned char* inputBuffer = NULL;
-	unsigned char* pInputBuffer = NULL;
-	char* dictMem = NULL;
-	unsigned char* outputBuffer = NULL;
+	unsigned char* inputBuffer;
+	unsigned char* pInputBuffer;
+	char* dictMem;
+	unsigned char* outputBuffer;
 
 	size_t blockStartCount,blockEndCount,blockFullCount, numberOfInputBlocks;
 
@@ -284,24 +274,9 @@ int main(int argc, char** argv)
 
 
 	/* Allocate memory buffers */
-	inputBuffer = (unsigned char*) malloc((512*1024*1024));
-	if(inputBuffer == NULL)
-	{
-		printf("Error allocating memory.\n");
-		return -1;
-	}
-	outputBuffer = (unsigned char*) malloc((512*1024*1024) + (size_t)(0.1*(512*1024*1024)));
-	if(outputBuffer == NULL)
-	{
-		printf("Error allocating memory.\n");
-		return -1;
-	}
-	dictMem = (char*) malloc(1024*1024*1);	/* 1MB */
-	if(dictMem == NULL)
-	{
-		printf("Error allocating memory.\n");
-		return -1;
-	}
+	inputBuffer = malloc(536970912);
+	outputBuffer = malloc(590558003);
+	dictMem = malloc(1048576);	/* 1MB */
 
 	/* Open the file for reading */
     infile = fopen(inputfname,"rb");

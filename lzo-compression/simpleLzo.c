@@ -3,15 +3,7 @@
 #include <immintrin.h>
 #include <sys/stat.h>
 
-#define DEFAULT_BLOCK_SIZE		262144	/* 256kB */
-#define OUTPUT_FILE_NAME        "out_file.txt"
-
-/* Size of Memory Buffer */
-#define BUFFER_SIZE	(512*1024*1024)		/* NOTE: MUST BE A MULTIPLE OF BLOCK SIZE IN ORDER FOR PROGRAM TO WORK PROPERLY!!! */
-										/* Can get around this with more coding, but for benchmarking purposes, not necessary or useful */
-
-unsigned int G_RD_BUFFER_SIZE;
-
+unsigned int read_buffer_size;
 
 static unsigned int
 do_compress ( unsigned char* in , unsigned int  in_len,
@@ -105,33 +97,32 @@ do_compress ( unsigned char* in , unsigned int  in_len,
     ii = ip;
 
     ip += ti < 4 ? 4 - ti : 0;
+	ip += 1 + ((ip - ii) >> 5);
 
-    for (;;)
-    {
+    for (;;) {
         const unsigned char* m_pos;
 
         unsigned int m_off;
         unsigned int m_len;
-        {
-			unsigned int dv;
-			unsigned int dindex;
-literal:
-	        ip += 1 + ((ip - ii) >> 5);
-next:
-			if (ip >= ip_end)
-	            break;
-	        dv = *((unsigned int*) ip);
-	        //dindex = DINDEX(dv,ip);
-	        //GINDEX(m_off,m_pos,in+dict,dindex,in);
-	        //UPDATE_I(dict,0,dindex,ip,in);
+		unsigned int dv;
+		unsigned int dindex;
+		if (ip >= ip_end)
+			break;
+		dv = *((unsigned int*) ip);
+		dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
+		m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+		dict[dindex] = ip-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
+
+		while (dv != *((unsigned int*) m_pos)) {
+			ip += 1 + ((ip - ii) >> 5);
+			if (ip >= ip_end) {
+				break;
+			}
+			dv = *((unsigned int*) ip);
 			dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
 			m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
 			dict[dindex] = ip-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
-
-	        if (dv != *((unsigned int*) m_pos))
-	            goto literal;
-        }
-
+		}
 
 		/* a match */
         ii -= ti; ti = 0;
@@ -239,7 +230,6 @@ next:
             *op++ = (unsigned char)(m_off << 2);
             *op++ = (unsigned char)(m_off >> 6);
         }
-        goto next;
     }
 
     *out_len = op - out;
@@ -267,7 +257,7 @@ int main(int argc, char** argv)
 	size_t blockStartCount,blockEndCount,blockFullCount, numberOfInputBlocks;
 
 	size_t fileSize, totalOutlen;
-	compressionBlockSizeBytes = DEFAULT_BLOCK_SIZE;
+	compressionBlockSizeBytes = 262144;
 
 	/***********************************************/
 	/* Parse command line parameters if they exist */
@@ -285,22 +275,22 @@ int main(int argc, char** argv)
 	}
 
 	/* Determine Read buffersize, needs to be a multiple of block size */
-	G_RD_BUFFER_SIZE = (BUFFER_SIZE/compressionBlockSizeBytes) * (compressionBlockSizeBytes);
+	read_buffer_size = ((512*1024*1024)/compressionBlockSizeBytes) * (compressionBlockSizeBytes);
 
 
 	/* Force Max Filesize to 512MBytes */
-	if(fileSize > G_RD_BUFFER_SIZE)
-		fileSize = G_RD_BUFFER_SIZE;
+	if(fileSize > read_buffer_size)
+		fileSize = read_buffer_size;
 
 
 	/* Allocate memory buffers */
-	inputBuffer = (unsigned char*) malloc(BUFFER_SIZE);
+	inputBuffer = (unsigned char*) malloc((512*1024*1024));
 	if(inputBuffer == NULL)
 	{
 		printf("Error allocating memory.\n");
 		return -1;
 	}
-	outputBuffer = (unsigned char*) malloc(BUFFER_SIZE + (size_t)(0.1*BUFFER_SIZE));
+	outputBuffer = (unsigned char*) malloc((512*1024*1024) + (size_t)(0.1*(512*1024*1024)));
 	if(outputBuffer == NULL)
 	{
 		printf("Error allocating memory.\n");
@@ -322,7 +312,7 @@ int main(int argc, char** argv)
 	}
 
 	/* Fill the Input Buffer For Compresssion */
-	numRead = fread(inputBuffer,1,G_RD_BUFFER_SIZE,infile);
+	numRead = fread(inputBuffer,1,read_buffer_size,infile);
 	fclose(infile);
 
 	printf("Beginning Compression of %s, Size = %d bytes, Iter=%d.\n",inputfname,numRead,numIterations);
@@ -373,7 +363,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	FILE* out = fopen(OUTPUT_FILE_NAME,"w");
+	FILE* out = fopen("out_file.txt","w");
 	fwrite(outputBuffer,1,totalOutlen,out);
 	fclose(out);
 

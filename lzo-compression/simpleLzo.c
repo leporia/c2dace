@@ -3,11 +3,8 @@
 #include <immintrin.h>
 #include <sys/stat.h>
 
-unsigned int read_buffer_size;
-
-unsigned int
-do_compress ( unsigned char* in , unsigned int  in_len,
-                    unsigned char* out, unsigned int* out_len,
+unsigned int do_compress ( unsigned char* in , unsigned int  in_len,
+                    unsigned char* out, unsigned int* out_len_block,
                     unsigned int  ti,  void* wrkmem)
 {
     unsigned char* ip;
@@ -84,7 +81,7 @@ do_compress ( unsigned char* in , unsigned int  in_len,
 					*op++ = (unsigned char)(tt);
 				}
 
-				for (int i=0;t > 0; t--) {
+				for (int i=0; i < t; i++) {
 					*op++ = *ii++;
 				}
 			}
@@ -158,7 +155,7 @@ do_compress ( unsigned char* in , unsigned int  in_len,
         }
     }
 
-    *out_len = op - out;
+    *out_len_block = op - out;
     return in_end - (ii-ti);
 }
 
@@ -172,6 +169,7 @@ void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
     unsigned int l = in_len;
     unsigned int t = 0;
 
+	unsigned int* out_len_compress = malloc(sizeof(unsigned int));
     while (l > 20) {
         unsigned long ll = l;
         unsigned long ll_end;
@@ -185,9 +183,9 @@ void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
 
         memset(wrkmem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
 
-        t = do_compress(ip,ll,op,out_len,t,wrkmem);
+        t = do_compress(ip,ll,op,out_len_compress,t,wrkmem);
         ip += ll;
-        op += *out_len;
+        op += *out_len_compress;
         l  -= ll;
     }
     t += l;
@@ -212,7 +210,7 @@ void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
             *op++ = (unsigned char)(tt);
         }
 
-		for (int i=0;t >0; t--) {
+		for (int i=0; i<t; i++) {
 			*op++ = *ii++;
 		}
     }
@@ -236,7 +234,6 @@ int main(int argc, char** argv)
 	unsigned int compressionBlockSizeBytes;
 	unsigned int bufferedBytes = 0;
 
-	unsigned int outLength;
 	unsigned int blockSize;
 	static char inputfname[300];
 	unsigned char* inputBuffer;
@@ -264,7 +261,7 @@ int main(int argc, char** argv)
 	}
 
 	/* Determine Read buffersize, needs to be a multiple of block size */
-	read_buffer_size = ((512*1024*1024)/compressionBlockSizeBytes) * (compressionBlockSizeBytes);
+	unsigned int read_buffer_size = ((512*1024*1024)/compressionBlockSizeBytes) * (compressionBlockSizeBytes);
 
 
 	/* Force Max Filesize to 512MBytes */
@@ -289,6 +286,7 @@ int main(int argc, char** argv)
 
 	numberOfInputBlocks = 0;
 
+	unsigned int* outLength = malloc(sizeof(unsigned int));
 	for(aa=0;aa<numIterations;aa++)
 	{
 		printf("Running iteration %d\n", aa);
@@ -311,7 +309,7 @@ int main(int argc, char** argv)
 		{
 			printf("Running block %d\n", numberOfInputBlocks);
 			lzo1x_1_15_compress(pInputBuffer, blockSize, 
-								outputBuffer, &outLength, dictMem);
+								outputBuffer, outLength, dictMem);
 			if(blockEndCount > blockStartCount)
 			{
 				blockFullCount += blockEndCount - blockStartCount;
@@ -323,7 +321,7 @@ int main(int argc, char** argv)
 			}
 			
 			numberOfInputBlocks++;
-			totalOutlen+=outLength;			//Update Length of Output Data
+			totalOutlen+=*outLength;			//Update Length of Output Data
 			pInputBuffer+=blockSize;					//Advance Input Pointer
 
 			fileSize-= blockSize;				//Update Remaining Filesize

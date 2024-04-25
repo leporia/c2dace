@@ -1419,6 +1419,9 @@ class CondExtractorNodeLister(NodeVisitor):
     def visit_IfStmt(self, node: IfStmt):
         self.nodes.append(node.cond[0])
 
+    def visit_WhileStmt(self, node: WhileStmt):
+        self.nodes.append(node.cond[0])
+
     def visit_BasicBlock(self, node: BasicBlock):
         return
 
@@ -1447,6 +1450,17 @@ class CondExtractor(NodeTransformer):
             return IfStmt(cond=cond, body_if=body_if, body_else=body_else)
         else:
             return IfStmt(cond=cond, body_if=body_if)
+
+    def visit_WhileStmt(self, node: WhileStmt):
+        if not hasattr(self, "count"):
+            self.count = 0
+        else:
+            self.count = self.count + 1
+        tmp = self.count
+
+        cond = [DeclRefExpr(name="tmp_if_" + str(tmp - 1))]
+        body = [self.visit(node.body[0])]
+        return WhileStmt(cond=cond, body=body)
 
     def visit_BasicBlock(self, node: BasicBlock):
         newbody = []

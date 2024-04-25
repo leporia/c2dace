@@ -1444,6 +1444,10 @@ class AST2SDFG:
             self.tasklet_count += 1
         declloop = False
         name = "FOR" + str(line)
+
+        cond_string = ConditionWriter(sdfg, self.name_mapping).write_tasklet_code(node.cond[0])
+        print(name, "COND:", cond_string)
+
         new_sdfg = dace.SDFG(name)
         begin_state = add_simple_state_to_sdfg(self, sdfg,
                                                "BeginState" + str(line))

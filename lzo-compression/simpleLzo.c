@@ -173,13 +173,13 @@ void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
     unsigned int t = 0;
 
     while (l > 20) {
-        size_t ll = l;
-        size_t ll_end;
+        unsigned long ll = l;
+        unsigned long ll_end;
 		/* Note throughput increase if you can fit everything in L1 cache? */
 		if (ll > 49152) {
 			ll = 49152;	
 		}
-        ll_end = (((size_t)ip) + ll);
+        ll_end = (ip + ll);
         if ((ll_end + ((t + ll) >> 5)) <= ll_end || (unsigned char*)(ll_end + ((t + ll) >> 5)) <= ip + ll)
             break;
 
@@ -230,7 +230,7 @@ int main(int argc, char** argv)
 {
 	int aa,numIterations;
 	int infile;
-	size_t numRead;
+	unsigned long numRead;
 	int outfile;
 	
 	unsigned int compressionBlockSizeBytes;
@@ -240,13 +240,12 @@ int main(int argc, char** argv)
 	unsigned int blockSize;
 	static char inputfname[300];
 	unsigned char* inputBuffer;
-	unsigned char* pInputBuffer;
 	char* dictMem;
 	unsigned char* outputBuffer;
 
-	size_t blockStartCount,blockEndCount,blockFullCount, numberOfInputBlocks;
+	unsigned long blockStartCount,blockEndCount,blockFullCount, numberOfInputBlocks;
 
-	size_t fileSize, totalOutlen;
+	unsigned long fileSize, totalOutlen;
 	compressionBlockSizeBytes = 262144;
 
 	/***********************************************/
@@ -280,11 +279,6 @@ int main(int argc, char** argv)
 
 	/* Open the file for reading */
     infile = fopen(inputfname,"rb");
-	if(infile == NULL)
-	{
-		printf("Error opening Handle to input file\n");
-		return -1;
-	}
 
 	/* Fill the Input Buffer For Compresssion */
 	numRead = fread(inputBuffer,1,read_buffer_size,infile);
@@ -299,6 +293,7 @@ int main(int argc, char** argv)
 	{
 		printf("Running iteration %d\n", aa);
 		blockFullCount = 0;
+		unsigned char* pInputBuffer;
 		pInputBuffer = inputBuffer;
 		fileSize = numRead;
 		bufferedBytes = numRead;

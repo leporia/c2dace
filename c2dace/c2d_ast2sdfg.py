@@ -389,7 +389,7 @@ class TaskletWriter:
             Double: "double",
             Float: "float",
             Int: "int",
-            UInt: "uint64_t",
+            UInt: "unsigned int",
             Char: "char",
             UChar: "unsigned char",
             Long: "long",
@@ -508,23 +508,22 @@ class TaskletWriter:
                 node.expr) + ")"
 
     def ccast2string(self, node: CCastExpr):
-        # print("CCAST: ","("+self.write_tasklet_code(node.expr)+")")
+        #print("CCAST: ","("+self.write_tasklet_code(node.expr)+")")
         if isinstance(node.type, Pointer):
+            # TODO handle all depths for higher order pointers
+            # actually needed? Can be supported by DaCe?
             (depth, var_type) = node.type.get_pointer_chain_end()
-            pointer_chain = ""
-            for _ in range(0, depth):
-                pointer_chain = pointer_chain + "*"
-                if isinstance(var_type, ConstantArray):
-                    size = var_type.size
-                    var_type = var_type.element_type
-                    return "(" + self.ast2ctypes[
-                        var_type.__class__] + "(" + pointer_chain + ")[" + str(
-                            size) + "])(" + self.write_tasklet_code(
-                                node.expr) + ")"
+            if isinstance(var_type, ConstantArray):
+                size = var_type.size
+                var_type = var_type.element_type
                 return "(" + self.ast2ctypes[
-                    var_type.
-                    __class__] + "(" + pointer_chain + "))(" + self.write_tasklet_code(
-                        node.expr) + ")"
+                    var_type.__class__] + "*)[" + str(
+                        size) + "])(" + self.write_tasklet_code(
+                            node.expr) + ")"
+            return "(" + self.ast2ctypes[
+                var_type.
+                __class__] + "*)(" + self.write_tasklet_code(
+                    node.expr) + ")"
         return "(" + self.ast2ctypes[
             node.type.__class__] + ")(" + self.write_tasklet_code(
                 node.expr) + ")"
@@ -549,7 +548,12 @@ class ConditionWriter(TaskletWriter):
             Double: "double",
             Float: "float",
             Int: "int",
+            UInt: "unsigned int",
             Char: "char",
+            UChar: "unsigned char",
+            Long: "long",
+            LongLong: "long long",
+            ULong: "unsigned long",
         }
         self.ast_elements = {
             BinOp: self.binop2string,
@@ -1350,12 +1354,13 @@ class AST2SDFG:
 
         body_start_state = sdfg.add_state("BodyWhileStartState" + str(line))
         self.last_sdfg_states[sdfg] = body_start_state
-        self.translate(node.body[0], sdfg)
 
         final_substate = sdfg.add_state("MergeState" + str(line))
-
-        self.last_loop_break[sdfg] = final_substate
         self.last_loop_continue[sdfg] = guard_substate
+        self.last_loop_break[sdfg] = final_substate
+
+        self.translate(node.body[0], sdfg)
+
         body_end_state = add_simple_state_to_sdfg(
             self, sdfg, "BodyWhileEndState" + str(line))
 

@@ -3,163 +3,6 @@
 #include <immintrin.h>
 #include <sys/stat.h>
 
-unsigned int do_compress ( unsigned char* in , unsigned int  in_len,
-                    unsigned char* out, unsigned int* out_len_block,
-                    unsigned int  ti,  void* wrkmem)
-{
-    unsigned char* ip;
-    unsigned char* op;
-    unsigned char* in_end = in + in_len;
-    unsigned char* ip_end = in + in_len - 20;
-    unsigned char* ii;
-    unsigned short* dict = wrkmem;
-
-    op = out;
-    ip = in;
-    ii = ip;
-
-	if (ti < 4) {
-		ip += 4 - ti;
-	}
-	ip += 1 + ((ip - ii) >> 5);
-
-    while (ip < ip_end) {
-        const unsigned char* m_pos;
-
-        unsigned int m_off;
-        unsigned int m_len;
-		unsigned int dv;
-		unsigned int dindex;
-
-		dv = *((unsigned int*) ip);
-		dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-		m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
-		dict[dindex] = ip-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
-
-		while (dv != *((unsigned int*) m_pos)) {
-			ip += 1 + ((ip - ii) >> 5);
-			if (ip >= ip_end) {
-				break;
-			}
-			dv = *((unsigned int*) ip);
-			dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-			m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
-			dict[dindex] = ip-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
-		}
-
-		/* a match */
-        ii -= ti; ti = 0;
-		unsigned int t = (ip-ii);
-		if (t != 0)
-		{
-			if (t <= 3)
-			{
-				op[-2] |= (unsigned char)(t);
-				*((unsigned int*) op) = *((unsigned int*) ii);
-				op += t;
-			}
-			else if (t <= 16)
-			{
-				*op++ = (unsigned char)(t - 3);
-				*((unsigned int*) op) = *((unsigned int*) ii);
-				*((unsigned int*) (op+4)) = *((unsigned int*) (ii+4));
-				*((unsigned int*) (op+8)) = *((unsigned int*) (ii+8));
-				*((unsigned int*) (op+12)) = *((unsigned int*) (ii+12));
-				op += t;
-			}
-			else
-			{
-				if (t <= 18)
-					*op++ = (unsigned char)(t - 3);
-				else
-				{
-					*op++ = 0;
-					unsigned int tt = t - 18;
-					for (tt = t-18; tt > 255; tt-=255) {
-						*(unsigned char *) op++ = 0;
-					}
-					*op++ = (unsigned char)(tt);
-				}
-
-				for (int i=0; i < t; i++) {
-					*op++ = *ii++;
-				}
-			}
-		}
-        
-
-
-		m_len = 4;
-		unsigned int bytematch;
-		unsigned int v;
-		v = *((unsigned int*) (ip + m_len)) ^ *((unsigned int*) (m_pos + m_len));
-		while (v == 0) {
-			m_len += 4;
-			v = *((unsigned int*) (ip + m_len)) ^ *((unsigned int*) (m_pos + m_len));
-			if (ip + m_len >= ip_end)
-				break;
-		}
-
-		if (ip + m_len < ip_end) {
-			bytematch = _bit_scan_forward(v);
-			m_len += (bytematch/8);
-		}
-
-
-        m_off = (ip-m_pos);		
-        ip += m_len;
-        ii = ip;
-        if (m_len <= 8 && m_off <= 0x800)
-        {
-            m_off -= 1;
-            *op++ = (unsigned char)(((m_len - 1) << 5) | ((m_off & 7) << 2));
-            *op++ = (unsigned char)(m_off >> 3);
-        }
-        else if (m_off <= 0x4000)
-        {
-            m_off -= 1;
-            if (m_len <= 33)
-                *op++ = (unsigned char)(0x20 | (m_len - 2));
-            else
-            {
-                m_len -= 33;
-                *op++ = 0x20 | 0;
-                while (m_len > 255)
-                {
-                    m_len -= 255;
-                    * (volatile unsigned char *) op++ = 0;
-                }
-                *op++ = (unsigned char)(m_len);
-            }
-            *op++ = (unsigned char)(m_off << 2);
-            *op++ = (unsigned char)(m_off >> 6);
-        }
-        else
-        {
-            m_off -= 0x4000;
-            if (m_len <= 0x9)
-                *op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8) | (m_len - 2));
-            else
-            {
-                m_len -= 0x9;
-                *op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8));
-                while (m_len > 255)
-                {
-                    m_len -= 255;
-                    * (volatile unsigned char *) op++ = 0;
-                }
-                *op++ = (unsigned char)(m_len);
-            }
-            *op++ = (unsigned char)(m_off << 2);
-            *op++ = (unsigned char)(m_off >> 6);
-        }
-    }
-
-    *out_len_block = op - out;
-    return in_end - (ii-ti);
-}
-
-
 void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
                          unsigned char* out, unsigned int* out_len,
                          void* wrkmem )
@@ -183,9 +26,157 @@ void lzo1x_1_15_compress( unsigned char* in, unsigned int  in_len,
 
         memset(wrkmem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
 
-        t = do_compress(ip,ll,op,out_len_compress,t,wrkmem);
+		unsigned char* ip_block;
+		unsigned char* in_end = in + ll;
+		unsigned char* ip_block_end = in + ll - 20;
+		unsigned char* ii;
+		unsigned short* dict = wrkmem;
+		unsigned int ti = t;
+
+		op = out;
+		ip_block = in;
+		ii = ip_block;
+
+		if (ti < 4) {
+			ip_block += 4 - ti;
+		}
+		ip_block += 1 + ((ip_block - ii) >> 5);
+
+		while (ip_block < ip_block_end) {
+			const unsigned char* m_pos;
+
+			unsigned int m_off;
+			unsigned int m_len;
+			unsigned int dv;
+			unsigned int dindex;
+
+			dv = *((unsigned int*) ip_block);
+			dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
+			m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+			dict[dindex] = ip_block-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
+
+			while (dv != *((unsigned int*) m_pos)) {
+				ip_block += 1 + ((ip_block - ii) >> 5);
+				if (ip_block >= ip_block_end) {
+					break;
+				}
+				dv = *((unsigned int*) ip_block);
+				dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
+				m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+				dict[dindex] = ip_block-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
+			}
+
+			/* a match */
+			ii -= ti; ti = 0;
+			unsigned int t = (ip_block-ii);
+			if (t != 0)
+			{
+				if (t <= 3)
+				{
+					op[-2] |= (unsigned char)(t);
+					*((unsigned int*) op) = *((unsigned int*) ii);
+					op += t;
+				}
+				else if (t <= 16)
+				{
+					*op++ = (unsigned char)(t - 3);
+					*((unsigned int*) op) = *((unsigned int*) ii);
+					*((unsigned int*) (op+4)) = *((unsigned int*) (ii+4));
+					*((unsigned int*) (op+8)) = *((unsigned int*) (ii+8));
+					*((unsigned int*) (op+12)) = *((unsigned int*) (ii+12));
+					op += t;
+				}
+				else
+				{
+					if (t <= 18)
+						*op++ = (unsigned char)(t - 3);
+					else
+					{
+						*op++ = 0;
+						unsigned int tt = t - 18;
+						for (tt = t-18; tt > 255; tt-=255) {
+							*(unsigned char *) op++ = 0;
+						}
+						*op++ = (unsigned char)(tt);
+					}
+
+					for (int i=0; i < t; i++) {
+						*op++ = *ii++;
+					}
+				}
+			}
+			
+
+
+			m_len = 4;
+			unsigned int bytematch;
+			unsigned int v;
+			v = *((unsigned int*) (ip_block + m_len)) ^ *((unsigned int*) (m_pos + m_len));
+			while (v == 0) {
+				m_len += 4;
+				v = *((unsigned int*) (ip_block + m_len)) ^ *((unsigned int*) (m_pos + m_len));
+				if (ip_block + m_len >= ip_block_end)
+					break;
+			}
+
+			if (ip_block + m_len < ip_block_end) {
+				bytematch = _bit_scan_forward(v);
+				m_len += (bytematch/8);
+			}
+
+
+			m_off = (ip_block-m_pos);		
+			ip_block += m_len;
+			ii = ip_block;
+			if (m_len <= 8 && m_off <= 0x800)
+			{
+				m_off -= 1;
+				*op++ = (unsigned char)(((m_len - 1) << 5) | ((m_off & 7) << 2));
+				*op++ = (unsigned char)(m_off >> 3);
+			}
+			else if (m_off <= 0x4000)
+			{
+				m_off -= 1;
+				if (m_len <= 33)
+					*op++ = (unsigned char)(0x20 | (m_len - 2));
+				else
+				{
+					m_len -= 33;
+					*op++ = 0x20 | 0;
+					while (m_len > 255)
+					{
+						m_len -= 255;
+						* (volatile unsigned char *) op++ = 0;
+					}
+					*op++ = (unsigned char)(m_len);
+				}
+				*op++ = (unsigned char)(m_off << 2);
+				*op++ = (unsigned char)(m_off >> 6);
+			}
+			else
+			{
+				m_off -= 0x4000;
+				if (m_len <= 0x9)
+					*op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8) | (m_len - 2));
+				else
+				{
+					m_len -= 0x9;
+					*op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8));
+					while (m_len > 255)
+					{
+						m_len -= 255;
+						* (volatile unsigned char *) op++ = 0;
+					}
+					*op++ = (unsigned char)(m_len);
+				}
+				*op++ = (unsigned char)(m_off << 2);
+				*op++ = (unsigned char)(m_off >> 6);
+			}
+		}
+
+		t = in_end - (ii-ti);
+
         ip += ll;
-        op += *out_len_compress;
         l  -= ll;
     }
     t += l;

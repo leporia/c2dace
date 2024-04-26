@@ -155,34 +155,41 @@ int main(int argc, char** argv)
 						if (t <= 3)
 						{
 							op[-2] |= (unsigned char)(t);
-							*((unsigned int*) op) = *((unsigned int*) ii);
+							((unsigned int*) op)[0] = ((unsigned int*) ii)[0];
 							op += t;
 						}
 						else if (t <= 16)
 						{
-							*op++ = (unsigned char)(t - 3);
-							*((unsigned int*) op) = *((unsigned int*) ii);
-							*((unsigned int*) (op+4)) = *((unsigned int*) (ii+4));
-							*((unsigned int*) (op+8)) = *((unsigned int*) (ii+8));
-							*((unsigned int*) (op+12)) = *((unsigned int*) (ii+12));
+							op[0] = (unsigned char)(t - 3);
+							op++;
+							((unsigned int*) op)[0] = ((unsigned int*) ii)[0];
+							((unsigned int*) (op))[1] = ((unsigned int*) (ii))[1];
+							((unsigned int*) (op))[2] = ((unsigned int*) (ii))[2];
+							((unsigned int*) (op))[3] = ((unsigned int*) (ii))[3];
 							op += t;
 						}
 						else
 						{
-							if (t <= 18)
-								*op++ = (unsigned char)(t - 3);
-							else
+							if (t <= 18) {
+								op[0] = (unsigned char)(t - 3);
+								op++;
+							} else
 							{
-								*op++ = 0;
+								op[0] = 0;
+								op++;
 								unsigned int tt = t - 18;
 								for (tt = t-18; tt > 255; tt-=255) {
-									*(unsigned char *) op++ = 0;
+									((unsigned char *) op)[0] = 0;
+									op++;
 								}
-								*op++ = (unsigned char)(tt);
+								op[0] = (unsigned char)(tt);
+								op++;
 							}
 
 							for (int i=0; i < t; i++) {
-								*op++ = *ii++;
+								op[0] = ii[0];
+								op++;
+								ii++;
 							}
 						}
 					}
@@ -192,10 +199,10 @@ int main(int argc, char** argv)
 					m_len = 4;
 					unsigned int bytematch;
 					unsigned int v;
-					v = *((unsigned int*) (ip_block + m_len)) ^ *((unsigned int*) (m_pos + m_len));
+					v = ((unsigned int*) ip_block)[1] ^ ((unsigned int*) m_pos)[1];
 					while (v == 0) {
 						m_len += 4;
-						v = *((unsigned int*) (ip_block + m_len)) ^ *((unsigned int*) (m_pos + m_len));
+						v = ((unsigned int*) ip_block)[m_len/4] ^ ((unsigned int*) m_pos)[m_len/4];
 						if (ip_block + m_len >= ip_block_end)
 							break;
 					}
@@ -212,46 +219,60 @@ int main(int argc, char** argv)
 					if (m_len <= 8 && m_off <= 0x800)
 					{
 						m_off -= 1;
-						*op++ = (unsigned char)(((m_len - 1) << 5) | ((m_off & 7) << 2));
-						*op++ = (unsigned char)(m_off >> 3);
+						op[0] = (unsigned char)(((m_len - 1) << 5) | ((m_off & 7) << 2));
+						op++;
+						op[0] = (unsigned char)(m_off >> 3);
+						op++;
 					}
 					else if (m_off <= 0x4000)
 					{
 						m_off -= 1;
-						if (m_len <= 33)
-							*op++ = (unsigned char)(0x20 | (m_len - 2));
-						else
+						if (m_len <= 33) {
+							op[0] = (unsigned char)(0x20 | (m_len - 2));
+							op++;
+						} else
 						{
 							m_len -= 33;
-							*op++ = 0x20 | 0;
+							op[0] = 0x20 | 0;
+							op++;
 							while (m_len > 255)
 							{
 								m_len -= 255;
-								* (volatile unsigned char *) op++ = 0;
+								((unsigned char *) op)[0] = 0;
+								op++;
 							}
-							*op++ = (unsigned char)(m_len);
+							op[0] = (unsigned char)(m_len);
+							op++;
 						}
-						*op++ = (unsigned char)(m_off << 2);
-						*op++ = (unsigned char)(m_off >> 6);
+						op[0] = (unsigned char)(m_off << 2);
+						op++;
+						op[0] = (unsigned char)(m_off >> 6);
+						op++;
 					}
 					else
 					{
 						m_off -= 0x4000;
-						if (m_len <= 0x9)
-							*op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8) | (m_len - 2));
-						else
+						if (m_len <= 0x9) {
+							op[0] = (unsigned char)(0x10 | ((m_off >> 11) & 8) | (m_len - 2));
+							op++;
+						} else
 						{
 							m_len -= 0x9;
-							*op++ = (unsigned char)(0x10 | ((m_off >> 11) & 8));
+							op[0] = (unsigned char)(0x10 | ((m_off >> 11) & 8));
+							op++;
 							while (m_len > 255)
 							{
 								m_len -= 255;
-								* (volatile unsigned char *) op++ = 0;
+								((unsigned char *) op)[0] = 0;
+								op++;
 							}
-							*op++ = (unsigned char)(m_len);
+							op[0] = (unsigned char)(m_len);
+							op++;
 						}
-						*op++ = (unsigned char)(m_off << 2);
-						*op++ = (unsigned char)(m_off >> 6);
+						op[0] = (unsigned char)(m_off << 2);
+						op++;
+						op[0] = (unsigned char)(m_off >> 6);
+						op++;
 					}
 				}
 
@@ -266,30 +287,39 @@ int main(int argc, char** argv)
 			{
 				unsigned char* ii = in + blockSize - t;
 
-				if (op == out && t <= 238)
-					*op++ = (unsigned char)(17 + t);
-				else if (t <= 3)
+				if (op == out && t <= 238) {
+					op[0] = (unsigned char)(17 + t);
+					op++;
+				} else if (t <= 3) {
 					op[-2] |= (unsigned char)(t);
-				else if (t <= 18)
-					*op++ = (unsigned char)(t - 3);
-				else
+				} else if (t <= 18) {
+					op[0] = (unsigned char)(t - 3);
+					op++;
+				} else
 				{
-					*op++ = 0;
+					op[0] = 0;
+					op++;
 					unsigned int tt;
 					for (tt = t-18; tt > 255; tt-=255) {
 						*(unsigned char *) op++ = 0;
 					}
-					*op++ = (unsigned char)(tt);
+					op[0] = (unsigned char)(tt);
+					op++;
 				}
 
 				for (int i=0; i<t; i++) {
-					*op++ = *ii++;
+					op[0] = ii[0];
+					op++;
+					ii++;
 				}
 			}
 
-			*op++ = 0x10 | 1;
-			*op++ = 0;
-			*op++ = 0;
+			op[0] = 0x10 | 1;
+			op++;
+			op[0] = 0;
+			op++;
+			op[0] = 0;
+			op++;
 
 			totalOutlen += op - out; //pd(op, out);
 

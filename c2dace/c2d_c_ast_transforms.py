@@ -874,6 +874,10 @@ class ArrayPointerExtractor(NodeTransformer):
             node.unprocessed_name = node.unprocessed_name.expr
             return self.visit(node)
 
+        if isinstance(node.unprocessed_name, CCastExpr):
+            node.unprocessed_name = node.unprocessed_name.expr
+            return self.visit(node)
+
         if isinstance(node.unprocessed_name, ArraySubscriptExpr):
             return ArraySubscriptExpr(
                 name=node.name,

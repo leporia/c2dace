@@ -87,7 +87,6 @@ int main(int argc, char** argv)
 		while(fileSize > 0)
 		{
 			printf("Running block %d\n", numberOfInputBlocks);
-			unsigned char* in = pInputBuffer;
 			unsigned char* ip = pInputBuffer;
 			unsigned char* out = outputBuffer;
 			unsigned char* op = outputBuffer;
@@ -108,48 +107,53 @@ int main(int argc, char** argv)
 				memset(dictMem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
 
 				unsigned char* ip_block;
-				unsigned char* in_end = in + ll;
-				unsigned char* ip_block_end = in + ll - 20;
+				unsigned char* in_end = pInputBuffer + ll;
+				unsigned char* ip_block_end = pInputBuffer + ll - 20;
 				unsigned char* ii;
 				unsigned short* dict = dictMem;
 				unsigned int ti = t;
 
 				op = out;
-				ip_block = in;
-				ii = ip_block;
+				ip_block = pInputBuffer;
+				ii = pInputBuffer;
 
 				if (ti < 4) {
 					ip_block += 4 - ti;
+					ip_block += (4 - ti) >> 5;
 				}
-				ip_block += 1 + ((ip_block - ii) >> 5);
+				ip_block += 1;
 
 				while (ip_block < ip_block_end) {
 					unsigned char* m_pos;
+					m_pos = pInputBuffer;
 
 					unsigned int m_off;
 					unsigned int m_len;
 					unsigned int dv;
 					unsigned int dindex;
 
-					dv = *((unsigned int*) ip_block);
+					dv = ((unsigned int*) ip_block)[0];
 					dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-					m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
-					dict[dindex] = ip_block-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
+					m_pos = pInputBuffer + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+					dict[dindex] = ip_block-pInputBuffer;		/* Update dictionary entry to point to the latest value, store relative offset. */
 
-					while (dv != *((unsigned int*) m_pos)) {
-						ip_block += 1 + ((ip_block - ii) >> 5);
+					while (dv != ((unsigned int*) m_pos)[0]) {
+						unsigned int diff;
+						diff = ip_block - ii;
+						ip_block += 1 + (diff >> 5);
 						if (ip_block >= ip_block_end) {
 							break;
 						}
 						dv = ((unsigned int*) ip_block)[0];
 						dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-						m_pos = in + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
-						dict[dindex] = ip_block-in;		/* Update dictionary entry to point to the latest value, store relative offset. */
+						m_pos = pInputBuffer + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+						dict[dindex] = ip_block-pInputBuffer;		/* Update dictionary entry to point to the latest value, store relative offset. */
 					}
 
 					/* a match */
 					ii -= ti; ti = 0;
-					unsigned int t = (ip_block-ii);
+					unsigned int t;
+					t = ip_block-ii;
 					if (t != 0)
 					{
 						if (t <= 3)
@@ -203,11 +207,15 @@ int main(int argc, char** argv)
 					while (v == 0) {
 						m_len += 4;
 						v = ((unsigned int*) ip_block)[m_len/4] ^ ((unsigned int*) m_pos)[m_len/4];
-						if (ip_block + m_len >= ip_block_end)
+						unsigned char* ip_curr;
+						ip_curr = ip_block + m_len;
+						if (ip_curr >= ip_block_end)
 							break;
 					}
 
-					if (ip_block + m_len < ip_block_end) {
+					unsigned char* ip_curr_2;
+					ip_curr_2 = ip_block + m_len;
+					if (ip_curr_2 < ip_block_end) {
 						bytematch = _bit_scan_forward(v);
 						m_len += (bytematch/8);
 					}
@@ -285,8 +293,10 @@ int main(int argc, char** argv)
 
 			if (t > 0)
 			{
-				unsigned char* ii = in + blockSize - t;
-				if (op == out && t <= 238) {
+				unsigned char* ii = pInputBuffer + blockSize - t;
+				unsigned char eq;
+				eq = op == out;
+				if (eq && t <= 238) {
 					op[0] = (unsigned char)(17 + t);
 					op++;
 				} else if (t <= 3) {

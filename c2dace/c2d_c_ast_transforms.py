@@ -902,6 +902,29 @@ class ArrayPointerExtractor(NodeTransformer):
             unprocessed_name=self.visit(node.unprocessed_name),
             index=binop)
 
+    def pointer_diff(self, node: BinOp):
+        ptr_binop = node.rvalue
+        if not hasattr(ptr_binop.lvalue, "type") or not hasattr(ptr_binop.rvalue, "type"):
+            return None
+
+        if not isinstance(ptr_binop.lvalue, DeclRefExpr) or not isinstance(ptr_binop.rvalue, DeclRefExpr):
+            return None
+
+        if not isinstance(ptr_binop.lvalue.type, Pointer) or not isinstance(ptr_binop.rvalue.type, Pointer):
+            return None
+
+        op1_name = self.array_map.get(ptr_binop.lvalue.name)
+        op2_name = self.array_map.get(ptr_binop.rvalue.name)
+        if op1_name is None or op2_name is None:
+            return None
+
+        print("twin transform for binop on", node.lvalue.name)
+        op1 = DeclRefExpr(name=op1_name, type=Int())
+        op2 = DeclRefExpr(name=op2_name, type=Int())
+        binop = BinOp(op=ptr_binop.op, lvalue=op1, rvalue=op2) 
+        lval = self.visit(node.lvalue)
+        return BinOp(op="=", lvalue=lval, rvalue=binop)
+
     def visit_BinOp(self, node: BinOp):
         if node.op != "=" :
             return self.generic_visit(node)
@@ -911,6 +934,12 @@ class ArrayPointerExtractor(NodeTransformer):
             lval = lval.expr
 
         node.lvalue = lval
+
+        if isinstance(node.rvalue, BinOp):
+            # a = b - c
+            res = self.pointer_diff(node)
+            if res is not None:
+                return res
 
         # a[i] = something
         if isinstance(lval, ArraySubscriptExpr):

@@ -573,6 +573,9 @@ def type_int(clang_type: clang.cindex.Type):
 def type_uint(clang_type: clang.cindex.Type):
     return UInt()
 
+def type_ushort(clang_type: clang.cindex.Type):
+    return UShort()
+
 
 def type_longlong(clang_type: clang.cindex.Type):
     return LongLong()
@@ -945,6 +948,7 @@ supported_type_kinds = {
     TypeKind.VOID: type_void,
     TypeKind.UCHAR: type_uchar,
     TypeKind.UINT: type_uint,
+    TypeKind.USHORT: type_ushort,
 }
 
 unsupported_type_kinds = [
@@ -953,7 +957,6 @@ unsupported_type_kinds = [
     TypeKind.CHAR_U,
     TypeKind.CHAR16,
     TypeKind.CHAR32,
-    TypeKind.USHORT,
     TypeKind.UINT128,
     TypeKind.SCHAR,
     TypeKind.WCHAR,

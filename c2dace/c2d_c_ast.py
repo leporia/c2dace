@@ -99,6 +99,8 @@ class Int(Type):
 class UInt(Type):
     _attributes = ()
 
+class UShort(Type):
+    _attributes = ()
 
 class Long(Type):
     _attributes = ()

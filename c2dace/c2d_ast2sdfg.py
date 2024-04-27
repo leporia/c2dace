@@ -432,6 +432,7 @@ class TaskletWriter:
             Long: "long",
             LongLong: "long long",
             ULong: "unsigned long",
+            UShort: "unsigned short",
         }
         self.ast_elements = {
             BinOp: self.binop2string,
@@ -591,6 +592,7 @@ class ConditionWriter(TaskletWriter):
             Long: "long",
             LongLong: "long long",
             ULong: "unsigned long",
+            UShort: "unsigned short",
         }
         self.ast_elements = {
             BinOp: self.binop2string,
@@ -777,8 +779,9 @@ class AST2SDFG:
             LongLong: dace.int64,
             ULongLong: dace.uint64,
             Bool: dace.uint8,
-            ULong: dace.uint32,
+            ULong: dace.uint64,
             UChar: dace.uint8,
+            UShort: dace.uint16,
         }
 
     def translate(self, node: Node, sdfg: SDFG):

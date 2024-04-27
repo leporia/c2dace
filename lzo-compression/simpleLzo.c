@@ -14,7 +14,6 @@ int main(int argc, char** argv)
 	unsigned int bufferedBytes = 0;
 
 	unsigned int blockSize;
-	static char inputfname[300];
 	unsigned char* inputBuffer;
 	char* dictMem;
 	unsigned char* outputBuffer;
@@ -27,17 +26,7 @@ int main(int argc, char** argv)
 	/***********************************************/
 	/* Parse command line parameters if they exist */
 	/***********************************************/
-	if( (argc == 3) && (strlen(argv[1]) < 300) )
-	{
-		strcpy(inputfname,argv[1]);
-		numIterations =  atoi(argv[2]);
-	}
-	else
-	{
-		/* Wrong # of arugments */
-		printf("Error in arguments: [Fname] [NumIter]\n");
-		return -1;
-	}
+	numIterations = 50;
 
 	/* Determine Read buffersize, needs to be a multiple of block size */
 	unsigned int read_buffer_size = ((512*1024*1024)/compressionBlockSizeBytes) * (compressionBlockSizeBytes);
@@ -54,13 +43,13 @@ int main(int argc, char** argv)
 	dictMem = malloc(1048576);	/* 1MB */
 
 	/* Open the file for reading */
-    infile = fopen(inputfname,"rb");
+    infile = fopen("input.txt","rb");
 
 	/* Fill the Input Buffer For Compresssion */
 	numRead = fread(inputBuffer,1,read_buffer_size,infile);
 	fclose(infile);
 
-	printf("Beginning Compression of %s, Size = %d bytes, Iter=%d.\n",inputfname,numRead,numIterations);
+	printf("Beginning Compression of %s, Size = %d bytes, Iter=%d.\n","input.txt",numRead,numIterations);
 
 
 	numberOfInputBlocks = 0;
@@ -101,7 +90,7 @@ int main(int argc, char** argv)
 				}
 				ll_end = ip + ll;
 				unsigned char* ll_end_mov;
-				ll_end_mov = ll_end + ((t + ll) >> 5);
+				ll_end_mov = ll_end + (ll >> 5);
 				unsigned char cond1, cond2;
 				cond1 = ll_end_mov <= ll_end;
 				unsigned char* ip_curr = ip;
@@ -117,18 +106,12 @@ int main(int argc, char** argv)
 				unsigned char* ip_block_end = pInputBuffer + ll - 20;
 				unsigned char* ii;
 				unsigned short* dict = dictMem;
-				unsigned int ti = t;
 
 				op = outputBuffer;
 				ip_block = pInputBuffer;
 				ii = pInputBuffer;
 
-				if (ti < 4) {
-					ip_block += 4 - ti;
-					ip_block += (4 - ti) >> 5;
-				}
-				ip_block += 1;
-
+				ip_block += 5;
 				while (ip_block < ip_block_end) {
 					unsigned char* m_pos;
 					m_pos = pInputBuffer;
@@ -157,38 +140,37 @@ int main(int argc, char** argv)
 					}
 
 					/* a match */
-					ii -= ti; ti = 0;
-					unsigned int t;
-					t = ip_block-ii;
-					if (t != 0)
+					unsigned int t_inner;
+					t_inner = ip_block-ii;
+					if (t_inner != 0)
 					{
-						if (t <= 3)
+						if (t_inner <= 3)
 						{
-							op[-2] |= (unsigned char)(t);
+							op[-2] |= (unsigned char)(t_inner);
 							((unsigned int*) op)[0] = ((unsigned int*) ii)[0];
-							op += t;
+							op += t_inner;
 						}
-						else if (t <= 16)
+						else if (t_inner <= 16)
 						{
-							op[0] = (unsigned char)(t - 3);
+							op[0] = (unsigned char)(t_inner - 3);
 							op++;
 							((unsigned int*) op)[0] = ((unsigned int*) ii)[0];
 							((unsigned int*) (op))[1] = ((unsigned int*) (ii))[1];
 							((unsigned int*) (op))[2] = ((unsigned int*) (ii))[2];
 							((unsigned int*) (op))[3] = ((unsigned int*) (ii))[3];
-							op += t;
+							op += t_inner;
 						}
 						else
 						{
-							if (t <= 18) {
-								op[0] = (unsigned char)(t - 3);
+							if (t_inner <= 18) {
+								op[0] = (unsigned char)(t_inner - 3);
 								op++;
 							} else
 							{
 								op[0] = 0;
 								op++;
-								unsigned int tt = t - 18;
-								for (tt = t-18; tt > 255; tt-=255) {
+								unsigned int tt = t_inner - 18;
+								for (tt = t_inner-18; tt > 255; tt-=255) {
 									((unsigned char *) op)[0] = 0;
 									op++;
 								}
@@ -196,7 +178,7 @@ int main(int argc, char** argv)
 								op++;
 							}
 
-							for (int i=0; i < t; i++) {
+							for (int i=0; i < t_inner; i++) {
 								op[0] = ii[0];
 								op++;
 								ii++;
@@ -295,11 +277,12 @@ int main(int argc, char** argv)
 					}
 				}
 
-				t = in_end - (ip_block - ti);
+				t = in_end - ip_block;
 
 				ip += ll;
 				l  -= ll;
 			}
+
 			t += l;
 
 			if (t > 0)

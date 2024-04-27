@@ -70,6 +70,9 @@ def get_var_name(node):
     if isinstance(node, UnOp):
         return get_var_name(node.lvalue)
 
+    if isinstance(node, CCastExpr):
+        return get_var_name(node.expr)
+
     if isinstance(node, DeclRefExpr):
         return node.name
 
@@ -101,6 +104,33 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
     call_nodes = filter(lambda x: hasattr(x, "type"), call_nodes)
     call_nodes = filter(lambda x: isinstance(x.type, Pointer), call_nodes)
 
+    # check for pointer assignment here as we need it for the inout connectors
+    pointer_decl = [node.name for node in walk(node.body) if isinstance(node, VarDecl) and isinstance(node.type, Pointer) and not isinstance(node.type.pointee_type, Opaque)]
+    for i in write_nodes:
+        if isinstance(i.rvalue, CallExpr) and i.rvalue.name.name == "malloc":
+            del pointer_decl[pointer_decl.index(get_var_name(i.lvalue))]
+
+    local_virtual_map = {}
+    for i in write_nodes:
+        if isinstance(i.lvalue, ArraySubscriptExpr) or isinstance(i.rvalue, ArraySubscriptExpr):
+            continue
+        if not get_var_name(i.lvalue) in pointer_decl:
+            continue
+        rval = get_var_name(i.rvalue)
+        mapped_name = state.name_mapping.get(top_sdfg).get(rval)
+        if mapped_name:
+            print("for mapping", get_var_name(i.lvalue), "to", rval)
+            local_virtual_map[get_var_name(i.lvalue)] = rval
+            continue
+        mapped_name = local_virtual_map.get(rval)
+        if mapped_name:
+            print("for mapping", get_var_name(i.lvalue), "to", mapped_name)
+            local_virtual_map[get_var_name(i.lvalue)] = mapped_name
+            continue
+
+    # merge the existing pointer map
+    local_virtual_map = local_virtual_map | state.virtual_mapped_arrays
+
     ext_call_nodes = [[node.args, state.ext_functions[node.name.name]] for node in walk(node.body) if isinstance(node, CallExpr) and node.name.name in state.ext_functions]
 
     write_vars = [node.lvalue for node in write_nodes] + list(copy.deepcopy(call_nodes))
@@ -124,11 +154,17 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
     read_names = []
 
     for i in write_vars:
-        if state.name_mapping.get(top_sdfg).get(get_var_name(i)) in top_sdfg.arrays:
-            write_names.append(get_var_name(i))
+        var_name = get_var_name(i)
+        if state.name_mapping.get(top_sdfg).get(var_name) in top_sdfg.arrays:
+            write_names.append(var_name)
+        elif state.name_mapping.get(top_sdfg).get(local_virtual_map.get(var_name)) in top_sdfg.arrays:
+            write_names.append(local_virtual_map.get(var_name))
     for i in read_vars:
-        if state.name_mapping.get(top_sdfg).get(get_var_name(i)) in top_sdfg.arrays:
+        var_name = get_var_name(i)
+        if state.name_mapping.get(top_sdfg).get(var_name) in top_sdfg.arrays:
             read_names.append(get_var_name(i))
+        elif state.name_mapping.get(top_sdfg).get(local_virtual_map.get(var_name)) in top_sdfg.arrays:
+            read_names.append(local_virtual_map.get(var_name))
 
     libstate_calls = [
         (node, state.libraries[node.name.name])
@@ -159,7 +195,8 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
 
     libstate_vars = state.libstate_vars.get(top_sdfg, set()).union(set(state.libstate_mapping.get(top_sdfg, {}).values()))
 
-    for i in top_sdfg.arrays:
+    usable_arrays = list(top_sdfg.arrays.keys()) + list(state.virtual_mapped_arrays.keys())
+    for i in usable_arrays:
         found = False
         for j in used_variables:
             # print("USED:",j.name)
@@ -181,12 +218,12 @@ def make_nested_sdfg_with_no_context_change(top_sdfg: Cursor, new_sdfg: Cursor,
                     global_value = True
                     break
         if not found:
-            # print("Skipping:", i, j.name, )
+            #print("Skipping:", j)
             continue
         else:
-            # print("NOT Skipping:", i, j.name, )
             if global_value:
                 j = DeclRefExpr(name=j)
+            #print("NOT Skipping:", j.name)
             state.name_mapping[new_sdfg][j.name] = find_new_array_name(
                 state.all_array_names, j.name)
             state.all_array_names.append(state.name_mapping[new_sdfg][j.name])
@@ -692,6 +729,7 @@ class AST2SDFG:
         self.current_function = None
         self.incomplete_arrays = {}
         self.name_mapping = name_mapping or NameMap()
+        self.virtual_mapped_arrays = {}
         self.arr_start_name_mapping = {}
         self.last_loop_continue = {}
         self.last_loop_break = {}
@@ -846,7 +884,6 @@ class AST2SDFG:
         break_state = add_simple_state_to_sdfg(self, sdfg,
                                                "BreakState" + str(line))
         self.last_loop_break_state[sdfg] = break_state
-        print("break:", sdfg)
         sdfg.add_edge(break_state, self.last_loop_break[sdfg],
                       dace.InterstateEdge())
 
@@ -2039,7 +2076,7 @@ class AST2SDFG:
             arrays = self.get_arrays_in_context(sdfg)
             mapped_name = self.get_name_mapping_in_context(sdfg).get(i.name)
 
-            if self.incomplete_arrays.get((sdfg, i.name)) is not None:
+            if self.incomplete_arrays.get((sdfg, i.name)) is not None and not isinstance(node.lvalue, ArraySubscriptExpr):
                 rval = node.rvalue
 
                 if isinstance(rval, StringLiteral):
@@ -2069,12 +2106,11 @@ class AST2SDFG:
                 if rval_mapped in arrays:
                     print("mapping ", i.name, " to ", rval_mapped)
                     self.name_mapping[sdfg][i.name] = rval_mapped
+                    self.virtual_mapped_arrays[i.name] = rval_mapped
 
                     # no need to create a tasklet because we do a mapping at compile time
                     return
                 else:
-                    # no need to handle this (i think) because we don't have double pointers
-                    print("Assigning to incomplete array ", i.name , " with rval ", rval, " ", rval_mapped)
                     continue
 
             if mapped_name in arrays and mapped_name not in output_names:

@@ -88,20 +88,26 @@ int main(int argc, char** argv)
 		{
 			printf("Running block %d\n", numberOfInputBlocks);
 			unsigned char* ip = pInputBuffer;
-			unsigned char* out = outputBuffer;
 			unsigned char* op = outputBuffer;
 			unsigned int l = blockSize;
 			unsigned int t = 0;
 
 			while (l > 20) {
 				unsigned long ll = l;
-				unsigned long ll_end;
+				unsigned char* ll_end;
 				/* Note throughput increase if you can fit everything in L1 cache? */
 				if (ll > 49152) {
 					ll = 49152;	
 				}
-				ll_end = (ip + ll);
-				if ((ll_end + ((t + ll) >> 5)) <= ll_end || (unsigned char*)(ll_end + ((t + ll) >> 5)) <= ip + ll)
+				ll_end = ip + ll;
+				unsigned char* ll_end_mov;
+				ll_end_mov = ll_end + ((t + ll) >> 5);
+				unsigned char cond1, cond2;
+				cond1 = ll_end_mov <= ll_end;
+				unsigned char* ip_curr = ip;
+				ip_curr = ip + ll;
+				cond2 = ll_end_mov <= ip_curr;
+				if (cond1 || cond2)
 					break;
 
 				memset(dictMem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
@@ -113,7 +119,7 @@ int main(int argc, char** argv)
 				unsigned short* dict = dictMem;
 				unsigned int ti = t;
 
-				op = out;
+				op = outputBuffer;
 				ip_block = pInputBuffer;
 				ii = pInputBuffer;
 
@@ -203,10 +209,15 @@ int main(int argc, char** argv)
 					m_len = 4;
 					unsigned int bytematch;
 					unsigned int v;
-					v = ((unsigned int*) ip_block)[1] ^ ((unsigned int*) m_pos)[1];
+					unsigned int op1, op2;
+					op1 = ((unsigned int*) ip_block)[m_len/4];
+					op2 = ((unsigned int*) m_pos)[m_len/4];
+					v = op1 ^ op2;
 					while (v == 0) {
 						m_len += 4;
-						v = ((unsigned int*) ip_block)[m_len/4] ^ ((unsigned int*) m_pos)[m_len/4];
+						op1 = ((unsigned int*) ip_block)[m_len/4];
+						op2 = ((unsigned int*) m_pos)[m_len/4];
+						v = op1 ^ op2;
 						unsigned char* ip_curr;
 						ip_curr = ip_block + m_len;
 						if (ip_curr >= ip_block_end)
@@ -221,7 +232,7 @@ int main(int argc, char** argv)
 					}
 
 
-					m_off = (ip_block-m_pos);		
+					m_off = ip_block-m_pos;
 					ip_block += m_len;
 					ii = ip_block;
 					if (m_len <= 8 && m_off <= 0x800)
@@ -284,7 +295,7 @@ int main(int argc, char** argv)
 					}
 				}
 
-				t = in_end - (ii-ti);
+				t = in_end - (ip_block - ti);
 
 				ip += ll;
 				l  -= ll;
@@ -295,7 +306,7 @@ int main(int argc, char** argv)
 			{
 				unsigned char* ii = pInputBuffer + blockSize - t;
 				unsigned char eq;
-				eq = op == out;
+				eq = op == outputBuffer;
 				if (eq && t <= 238) {
 					op[0] = (unsigned char)(17 + t);
 					op++;
@@ -331,7 +342,9 @@ int main(int argc, char** argv)
 			op[0] = 0;
 			op++;
 
-			totalOutlen += op - out; //pd(op, out);
+			long outlen_temp;
+			outlen_temp = op - outputBuffer;
+			totalOutlen += outlen_temp; //pd(op, out);
 
 			if(blockEndCount > blockStartCount)
 			{

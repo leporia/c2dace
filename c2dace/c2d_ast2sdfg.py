@@ -1404,8 +1404,6 @@ class AST2SDFG:
         body_end_state = add_simple_state_to_sdfg(
             self, sdfg, "BodyWhileEndState" + str(line))
 
-
-
         #body_state = make_nested_sdfg_with_no_context_change(
         #    sdfg, new_sdfg, name, used_vars, self)
 

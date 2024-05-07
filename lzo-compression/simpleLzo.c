@@ -6,7 +6,7 @@
 int main(int argc, char** argv)
 {
 	int aa,numIterations;
-	int infile;
+	FILE* infile;
 	unsigned long numRead;
 	int outfile;
 	
@@ -54,7 +54,6 @@ int main(int argc, char** argv)
 
 	numberOfInputBlocks = 0;
 
-	unsigned int* outLength = malloc(sizeof(unsigned int));
 	for(aa=0;aa<numIterations;aa++)
 	{
 		printf("Running iteration %d\n", aa);
@@ -63,7 +62,6 @@ int main(int argc, char** argv)
 		pInputBuffer = inputBuffer;
 		fileSize = numRead;
 		bufferedBytes = numRead;
-
 
 		totalOutlen = 0;
 		
@@ -81,29 +79,23 @@ int main(int argc, char** argv)
 			unsigned int l = blockSize;
 			unsigned int t = 0;
 
-			while (l > 20) {
+			while (l > 31) {
+				printf("Running inside %u\n", l);
 				unsigned long ll = l;
-				unsigned char* ll_end;
+				unsigned char* ll_end = ip;
 				/* Note throughput increase if you can fit everything in L1 cache? */
 				if (ll > 49152) {
 					ll = 49152;	
 				}
 				ll_end = ip + ll;
-				unsigned char* ll_end_mov;
-				ll_end_mov = ll_end + (ll >> 5);
-				unsigned char cond1, cond2;
-				cond1 = ll_end_mov <= ll_end;
-				unsigned char* ip_curr = ip;
-				ip_curr = ip + ll;
-				cond2 = ll_end_mov <= ip_curr;
-				if (cond1 || cond2)
-					break;
 
 				memset(dictMem, 0, ((unsigned int)1 << 13 /*DBITS*/) * sizeof(unsigned short));
 
 				unsigned char* ip_block;
 				unsigned char* in_end = pInputBuffer + ll;
-				unsigned char* ip_block_end = pInputBuffer + ll - 20;
+				unsigned char* ip_block_end = pInputBuffer;
+				ip_block_end += ll;
+				ip_block_end -= 20;
 				unsigned char* ii;
 				unsigned short* dict = dictMem;
 
@@ -112,7 +104,10 @@ int main(int argc, char** argv)
 				ii = pInputBuffer;
 
 				ip_block += 5;
-				while (ip_block < ip_block_end) {
+				unsigned char cond_ipblock;
+				cond_ipblock = ip_block < ip_block_end;
+				while (cond_ipblock) {
+					printf("ip cond\n");
 					unsigned char* m_pos;
 					m_pos = pInputBuffer;
 
@@ -146,7 +141,9 @@ int main(int argc, char** argv)
 					{
 						if (t_inner <= 3)
 						{
-							op[-2] |= (unsigned char)(t_inner);
+							op -= 2;
+							op[0] |= (unsigned char)(t_inner);
+							op += 2;
 							((unsigned int*) op)[0] = ((unsigned int*) ii)[0];
 							op += t_inner;
 						}
@@ -195,15 +192,23 @@ int main(int argc, char** argv)
 					op1 = ((unsigned int*) ip_block)[m_len/4];
 					op2 = ((unsigned int*) m_pos)[m_len/4];
 					v = op1 ^ op2;
-					while (v == 0) {
+					if (v == 0) {
 						m_len += 4;
 						op1 = ((unsigned int*) ip_block)[m_len/4];
 						op2 = ((unsigned int*) m_pos)[m_len/4];
 						v = op1 ^ op2;
-						unsigned char* ip_curr;
+						unsigned char* ip_curr = ip_block;
 						ip_curr = ip_block + m_len;
-						if (ip_curr >= ip_block_end)
-							break;
+						unsigned char cond_w;
+						cond_w = ip_curr < ip_block_end;
+						while (v == 0 && cond_w) {
+							m_len += 4;
+							op1 = ((unsigned int*) ip_block)[m_len/4];
+							op2 = ((unsigned int*) m_pos)[m_len/4];
+							v = op1 ^ op2;
+							ip_curr = ip_block + m_len;
+							cond_w = ip_curr < ip_block_end;
+						}
 					}
 
 					unsigned char* ip_curr_2;
@@ -216,6 +221,7 @@ int main(int argc, char** argv)
 
 					m_off = ip_block-m_pos;
 					ip_block += m_len;
+					printf("move block by %u\n", m_len);
 					ii = ip_block;
 					if (m_len <= 8 && m_off <= 0x800)
 					{
@@ -275,13 +281,17 @@ int main(int argc, char** argv)
 						op[0] = (unsigned char)(m_off >> 6);
 						op++;
 					}
+					cond_ipblock = ip_block < ip_block_end;
 				}
 
 				t = in_end - ip_block;
 
+				printf("end subtraction %d\n", t);
 				ip += ll;
 				l  -= ll;
 			}
+
+			printf("post while %d\n", t);
 
 			t += l;
 
@@ -294,7 +304,7 @@ int main(int argc, char** argv)
 					op[0] = (unsigned char)(17 + t);
 					op++;
 				} else if (t <= 3) {
-					op[-2] |= (unsigned char)(t);
+					op[0] |= (unsigned char)(t);
 				} else if (t <= 18) {
 					op[0] = (unsigned char)(t - 3);
 					op++;
@@ -352,6 +362,9 @@ int main(int argc, char** argv)
 	FILE* out = fopen("out_file.txt","w");
 	fwrite(outputBuffer,1,totalOutlen,out);
 	fclose(out);
+
+	// force to keep this
+	printf("out %u\n", outputBuffer[0]);
 
 	free(inputBuffer);
 	free(dictMem);

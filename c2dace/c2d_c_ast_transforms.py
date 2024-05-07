@@ -993,6 +993,15 @@ class ArrayPointerExtractor(NodeTransformer):
 
         for child in node.body:
             newbody.append(self.visit(child))
+            if isinstance(child, BinOp) and child.op == "=" and isinstance(child.lvalue, DeclRefExpr) and isinstance(child.rvalue, DeclRefExpr):
+                # a = b
+                lname = self.array_map.get(child.lvalue.name)
+                rname = self.array_map.get(child.rvalue.name)
+                if lname and rname:
+                    twin_assign = BinOp(op="=", lvalue=DeclRefExpr(name=lname, type=Int()), rvalue=DeclRefExpr(name=rname, type=Int()))
+                    newbody.append(twin_assign)
+                    continue
+
             if not isinstance(child, DeclStmt) or len(child.vardecl) != 1:
                 continue
                 

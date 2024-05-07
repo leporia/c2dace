@@ -87,12 +87,14 @@ int main(int argc, char** argv)
 				if (ll > 49152) {
 					ll = 49152;	
 				}
-				ll_end = ip + ll;
+				ll_end = ip;
+				ll_end += ll;
 
 				memset(dictMem, 0, (1 << 13) * sizeof(unsigned short));
 
 				unsigned char* ip_block;
-				unsigned char* in_end = pInputBuffer + ll;
+				unsigned char* in_end = pInputBuffer;
+				in_end += ll;
 				unsigned char* ip_block_end = pInputBuffer;
 				ip_block_end += ll;
 				ip_block_end -= 20;
@@ -122,7 +124,8 @@ int main(int argc, char** argv)
 					dv |= ip_block[3] << 24;
 
 					dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-					m_pos = pInputBuffer + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+					m_pos = pInputBuffer;
+					m_pos += dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
 					dict[dindex] = ip_block-pInputBuffer;		/* Update dictionary entry to point to the latest value, store relative offset. */
 
 					unsigned int while_cond1 = 0;
@@ -145,7 +148,8 @@ int main(int argc, char** argv)
 						dv |= ip_block[3] << 24;
 
 						dindex = ((dv * 0x1824429D) >> 19) & 0x1FFF;	/* Determine dictionary index that maps to the new data value.		*/
-						m_pos = pInputBuffer + dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
+						m_pos = pInputBuffer;
+						m_pos += dict[dindex];	/* Obtain absolute address of the current dictionary entry match.	*/
 						dict[dindex] = ip_block-pInputBuffer;		/* Update dictionary entry to point to the latest value, store relative offset. */
 
 						while_cond1 = m_pos[0];
@@ -157,6 +161,7 @@ int main(int argc, char** argv)
 					/* a match */
 					unsigned int t_inner;
 					t_inner = ip_block-ii;
+					printf("tinner %u\n", t_inner);
 					if (t_inner != 0)
 					{
 						if (t_inner <= 3)
@@ -201,39 +206,54 @@ int main(int argc, char** argv)
 					unsigned int bytematch;
 					unsigned int v;
 					unsigned int op1, op2;
-					op1 = ((unsigned int*) ip_block)[m_len/4];
-					op2 = ((unsigned int*) m_pos)[m_len/4];
+
+					op1 = ip_block[m_len];
+					op1 |= ip_block[m_len + 1] << 8;
+					op1 |= ip_block[m_len + 2] << 16;
+					op1 |= ip_block[m_len + 3] << 24;
+
+					op2 = m_pos[m_len];
+					op2 |= m_pos[m_len + 1] << 8;
+					op2 |= m_pos[m_len + 2] << 16;
+					op2 |= m_pos[m_len + 3] << 24;
+
 					v = op1 ^ op2;
-					if (v == 0) {
+					unsigned char* ip_curr = ip_block;
+					ip_curr += m_len;
+					unsigned char cond_w;
+					cond_w = ip_curr < ip_block_end;
+
+					while (v == 0 && cond_w) {
+						printf("exec in while\n");
 						m_len += 4;
-						op1 = ((unsigned int*) ip_block)[m_len/4];
-						op2 = ((unsigned int*) m_pos)[m_len/4];
+						op1 = ip_block[m_len];
+						op1 |= ip_block[m_len + 1] << 8;
+						op1 |= ip_block[m_len + 2] << 16;
+						op1 |= ip_block[m_len + 3] << 24;
+
+						op2 = m_pos[m_len];
+						op2 |= m_pos[m_len + 1] << 8;
+						op2 |= m_pos[m_len + 2] << 16;
+						op2 |= m_pos[m_len + 3] << 24;
 						v = op1 ^ op2;
-						unsigned char* ip_curr = ip_block;
-						ip_curr = ip_block + m_len;
-						unsigned char cond_w;
+						ip_curr = ip_block;
+						ip_curr += m_len;
 						cond_w = ip_curr < ip_block_end;
-						while (v == 0 && cond_w) {
-							m_len += 4;
-							op1 = ((unsigned int*) ip_block)[m_len/4];
-							op2 = ((unsigned int*) m_pos)[m_len/4];
-							v = op1 ^ op2;
-							ip_curr = ip_block + m_len;
-							cond_w = ip_curr < ip_block_end;
-						}
 					}
 
 					unsigned char* ip_curr_2;
-					ip_curr_2 = ip_block + m_len;
+					ip_curr_2 = ip_block;
+					ip_curr_2 += m_len;
 					if (ip_curr_2 < ip_block_end) {
 						bytematch = _bit_scan_forward(v);
+						printf("bytematch %u\n", bytematch);
 						m_len += (bytematch/8);
 					}
 
 
 					m_off = ip_block-m_pos;
 					ip_block += m_len;
-					printf("move block by %u\n", m_len);
+					printf("move block by %u, offset %u\n", m_len, m_off);
 					ii = ip_block;
 					if (m_len <= 8 && m_off <= 0x800)
 					{
@@ -309,7 +329,8 @@ int main(int argc, char** argv)
 
 			if (t > 0)
 			{
-				unsigned char* ii = pInputBuffer + blockSize - t;
+				unsigned char* ii = pInputBuffer;
+				ii += (blockSize - t);
 				unsigned char eq;
 				eq = op == outputBuffer;
 				if (eq && t <= 238) {
